@@ -208,7 +208,7 @@ async def approve_welfare(payload: WelfareApproveIn):
                     "entry":  entry_id,
                     "num":    len(payload.lines) + 1,
                     "acct":   ministry_account,
-                    "desc":   "חו"ז משרד הרווחה",
+                    "desc":   'חו"ז משרד הרווחה',
                     "debit":  float(diff) if diff > 0 else 0.0,
                     "credit": float(abs(diff)) if diff < 0 else 0.0,
                     "ref":    "חוז",
