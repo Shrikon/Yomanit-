@@ -91,7 +91,8 @@ async def upload_welfare(
         })
 
     # חסרים עם ₪0 לא חוסמים אישור
-    blocking_missing = [r for r in missing if float(r.get('debit_total', 0) or r.get('zikuy_hodesh', 0) or 0) != 0]
+    # חסרים חוסמים רק אם יש להם סכום > 0
+    blocking_missing = [r for r in missing if float(r.get('amount', 0) or 0) > 0]
     can_approve = len(blocking_missing) == 0
 
     return {
