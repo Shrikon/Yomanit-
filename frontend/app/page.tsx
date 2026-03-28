@@ -1,7 +1,7 @@
 'use client';
 import React, { useState, useEffect } from 'react';
 
-const API = 'https://yomanit.onrender.com';
+const API = 'http://localhost:8000';
 const BEZEQ_TEMPLATE_ID = '34967fa4-a92c-4876-bf73-f6cf05804519';
 
 interface Municipality { id: string; name: string; code: string; }
@@ -341,7 +341,7 @@ export default function App() {
   const [muni, setMuni] = useState<Municipality | null>(null);
   const [munis, setMunis] = useState<Municipality[]>([]);
   const [activeTab, setActiveTab] = useState('bezeq');
-  const [bezeqView, setBezeqView] = useState<'home'|'intake'|'indexes'>('home');
+  const [bezeqView, setBezeqView] = useState<'home'|'intake'|'indexes'|'settings'>('home');
   const [elecView, setElecView] = useState<'home'|'intake'|'indexes'>('home');
   const [elecIndexSearch, setElecIndexSearch] = useState('');
   const [elecIndexes, setElecIndexes] = useState<any[]>([]);
