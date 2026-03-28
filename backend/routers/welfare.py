@@ -23,8 +23,42 @@ async def upload_welfare(
     if not content:
         raise HTTPException(status_code=400, detail="קובץ ריק")
 
+    # טען אינדקס מה-DB
+    from main import database as _db
     try:
-        parsed = parse_welfare(content, month=month)
+        welfare_tmpl = await _db.fetch_one(
+            "SELECT id FROM templates WHERE name = 'welfare'", values={}
+        )
+        welfare_tmpl_id = str(welfare_tmpl["id"]) if welfare_tmpl else None
+        
+        index_rows = []
+        if welfare_tmpl_id:
+            index_rows = await _db.fetch_all(
+                """SELECT key_value, account_code, description
+                   FROM indexes
+                   WHERE municipality_id = :muni AND template_id = :tmpl AND active = TRUE""",
+                values={"muni": municipality_id, "tmpl": welfare_tmpl_id}
+            )
+        
+        # בנה index_map: semel → {debit: account, credit: account}
+        index_map = {}
+        for row in index_rows:
+            semel = row["key_value"]
+            acct  = row["account_code"]
+            side  = row["description"]  # 'debit' או 'credit'
+            if semel not in index_map:
+                index_map[semel] = {}
+            if side in ("debit", "credit"):
+                index_map[semel][side] = acct
+        
+        # אם אין אינדקס ב-DB – השתמש בברירת מחדל
+        use_index = index_map if index_map else None
+        
+    except Exception:
+        use_index = None
+
+    try:
+        parsed = parse_welfare(content, month=month, index_map=use_index)
     except WelfareParserError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -92,6 +126,7 @@ class WelfareApproveIn(BaseModel):
     municipality_id: str
     period:          str
     month:           int
+    year:            int = 2026
     source_file:     Optional[str] = None
     lines:           List[WelfareLineIn]
 
