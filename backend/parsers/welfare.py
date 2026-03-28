@@ -78,13 +78,7 @@ def _validate_welfare_format(sheets: dict) -> None:
         )
 
 
-def parse_welfare(content: bytes, month: int = None, index_map: Dict[str, Dict] = None) -> Dict[str, Any]:
-    """
-    index_map: dict של semel → {debit: account, credit: account}
-    אם לא מועבר, משתמש ב-WELFARE_INDEX הקשיח (תמר)
-    """
-    welfare_index = index_map if index_map is not None else WELFARE_INDEX
-
+def parse_welfare(content: bytes, month: int = None) -> Dict[str, Any]:
     try:
         sheets = pd.read_excel(io.BytesIO(content), sheet_name=None, header=None)
     except Exception as e:
@@ -170,8 +164,9 @@ def parse_welfare(content: bytes, month: int = None, index_map: Dict[str, Dict] 
                 'zikuy':       0,
             }
 
-        # חובה – רק תשלומי ממשלה, סכום כל השורות
-        if maslul == 'תשלומי ממשלה':
+        # חובה – כל שורות תשלומי ממשלה (מס"ר, מת"ס, מסר-המחאות וכו')
+        # לוקחים col19 (סה"כ הוצאה) ומסכמים את כולן
+        if maslul and maslul.strip() not in [' ', ''] and 'רשות' not in maslul and 'ילדי חוץ' not in maslul:
             semel_data[semel]['has_ממשלה'] = True
             semel_data[semel]['debit_total'] += total
 
@@ -182,7 +177,7 @@ def parse_welfare(content: bytes, month: int = None, index_map: Dict[str, Dict] 
     # בנה rows
     rows = []
     for semel, data in semel_data.items():
-        idx = welfare_index.get(semel, {})
+        idx = WELFARE_INDEX.get(semel, {})
         rows.append({
             "semel":         semel,
             "name":          data['name'],
