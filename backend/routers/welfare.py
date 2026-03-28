@@ -90,7 +90,9 @@ async def upload_welfare(
             "error":       r.get("error", ""),
         })
 
-    can_approve = len(missing) == 0
+    # חסרים עם ₪0 לא חוסמים אישור
+    blocking_missing = [r for r in missing if float(r.get('debit_total', 0) or r.get('zikuy_hodesh', 0) or 0) != 0]
+    can_approve = len(blocking_missing) == 0
 
     return {
         "filename":      file.filename,
