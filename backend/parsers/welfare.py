@@ -250,4 +250,7 @@ def apply_welfare_splits(parsed: dict) -> Tuple[List[Dict], List[Dict]]:
                 "description": f"רווחה {row['semel']} {row['name']}",
             })
 
+    return matched, missing           "description": f"רווחה {row['semel']} {row['name']}",
+            })
+
     return matched, missing
