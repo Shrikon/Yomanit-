@@ -166,7 +166,6 @@ def parse_welfare(content: bytes, month: int = None, index_map: Dict[str, Dict] 
             }
 
         # חובה – כל שורות תשלומי ממשלה (מס"ר, מת"ס, מסר-המחאות וכו')
-        # לוקחים col19 (סה"כ הוצאה) ומסכמים את כולן
         if maslul and maslul.strip() not in [' ', ''] and 'רשות' not in maslul and 'ילדי חוץ' not in maslul:
             semel_data[semel]['has_ממשלה'] = True
             semel_data[semel]['debit_total'] += total
@@ -248,9 +247,6 @@ def apply_welfare_splits(parsed: dict) -> Tuple[List[Dict], List[Dict]]:
                 "amount":      float(abs(zikuy)),
                 "side":        "credit",
                 "description": f"רווחה {row['semel']} {row['name']}",
-            })
-
-    return matched, missing           "description": f"רווחה {row['semel']} {row['name']}",
             })
 
     return matched, missing
