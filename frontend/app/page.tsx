@@ -458,23 +458,17 @@ function WelfareDashboard({ muni, onNewIntake, refreshKey }: { muni: any, onNewI
     if (!muni) return;
     setLoading(true);
     try {
-      let tmplId = templateId;
-      if (!tmplId) {
-        try {
-          const tmpls = await apiFetch('/templates');
-          const wt = Array.isArray(tmpls) ? tmpls.find((t:any) => t.name === 'welfare') : null;
-          tmplId = wt?.id || null;
-          setTemplateId(tmplId);
-        } catch { tmplId = null; }
-      }
-      const url = tmplId
-        ? `/journal-entries?municipality_id=${muni.id}&template_id=${tmplId}&limit=50`
-        : `/journal-entries?municipality_id=${muni.id}&limit=50`;
+      // welfare template_id נשמר כ-constant — אין endpoint /templates
+      const WELFARE_TEMPLATE_ID = '95b37d2d-c9ea-4ef1-9164-ab5ac642b0c7';
+      const url = `/journal-entries?municipality_id=${muni.id}&template_id=${WELFARE_TEMPLATE_ID}&limit=50`;
       const data = await apiFetch(url);
       const all = Array.isArray(data) ? data : [];
-      const filtered = tmplId
-        ? all.filter((e:any) => String(e.template_id) === String(tmplId))
-        : all.filter((e:any) => e.source_type === 'welfare' || e.template_key === 'welfare');
+      const filtered = all.filter((e:any) =>
+        String(e.template_id) === WELFARE_TEMPLATE_ID ||
+        e.source_type === 'welfare' ||
+        e.template_key === 'welfare' ||
+        (e.reference_num && e.reference_num.startsWith('WLF'))
+      );
       setEntries(filtered);
     } catch { setEntries([]); } finally { setLoading(false); }
   };
