@@ -386,26 +386,26 @@ def apply_welfare_splits(parsed: dict) -> Tuple[List[Dict], List[Dict]]:
                 "description": f"רווחה {row['semel']} {row['name']}",
             })
 
-    # שורת חו"ז — לפי שורת סיכום הדוח בלבד (לא מחושב!)
-    choz_account = "700000000"
-    total_debit_matched = sum(Decimal(str(r["amount"])) for r in matched if r["side"] == "debit")
-    total_credit_matched = sum(Decimal(str(r["amount"])) for r in matched if r["side"] == "credit")
-
-    # קח חו"ז משורת הסיכום אם קיימת, אחרת כך חשב מההפרש
+    # שורת חו"ז — מהדוח בלבד, ללא איזון מלאכותי
+    # כלל זהב: בדוחות רווחה אין שורת איזון
     summary_choz = parsed.get("summary_choz")
-    if summary_choz:
-        choz_amount = Decimal(str(summary_choz))
-    else:
-        choz_amount = total_debit_matched - total_credit_matched
-
-    if choz_amount > Decimal("0"):
+    if summary_choz and Decimal(str(summary_choz)) > Decimal("0"):
         matched.append({
             "semel":       "חוז",
             "name":        'חו"ז משרד הרווחה',
-            "account":     choz_account,
-            "amount":      float(choz_amount),
+            "account":     "700000000",
+            "amount":      float(Decimal(str(summary_choz))),
             "side":        "credit",
             "description": 'חו"ז משרד הרווחה',
         })
+
+    # בדיקת תקינות בלבד — לא מתקנים
+    summary_mishrad = parsed.get("summary_mishrad")
+    if summary_mishrad and summary_choz:
+        total_credit = sum(Decimal(str(r["amount"])) for r in matched if r["side"] == "credit")
+        expected_credit = Decimal(str(summary_mishrad)) - Decimal(str(summary_choz))
+        gap = abs(total_credit - Decimal(str(summary_mishrad)))
+        if gap > Decimal("1"):
+            print(f"[WELFARE] WARNING: credit gap = {gap} (total_credit={total_credit}, mishrad={summary_mishrad})")
 
     return matched, missing
