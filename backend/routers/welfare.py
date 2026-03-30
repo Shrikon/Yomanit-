@@ -238,24 +238,8 @@ async def approve_welfare(payload: WelfareApproveIn):
                 }
             )
 
-        # שורת חו"ז משרד הרווחה – ההפרש בין זכות לחובה
-        if diff != Decimal("0"):
-            await database.execute(
-                """INSERT INTO journal_lines
-                   (id,entry_id,line_num,account,description,debit,credit,reference,key_value)
-                   VALUES (:id,:entry,:num,:acct,:desc,:debit,:credit,:ref,:key)""",
-                values={
-                    "id":     str(uuid4()),
-                    "entry":  entry_id,
-                    "num":    len(payload.lines) + 1,
-                    "acct":   ministry_account,
-                    "desc":   'חו"ז משרד הרווחה',
-                    "debit":  float(diff) if diff > 0 else 0.0,
-                    "credit": float(abs(diff)) if diff < 0 else 0.0,
-                    "ref":    "חוז",
-                    "key":    "חוז",
-                }
-            )
+        # רווחה: אין שורת איזון — חו"ז כבר קיים בתוך payload.lines מהדוח
+        # כלל זהב: approve אינו מאזן — הוא רק מאשר
 
     return {
         "id":            entry_id,
