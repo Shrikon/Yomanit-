@@ -40,7 +40,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 # --- Routers ---
-from routers import auth, municipalities, indexes, upload, journal, electricity, import_batches, export_events, index_exceptions, template_rules, welfare
+from routers import auth, municipalities, indexes, upload, journal, electricity, import_batches, export_events, index_exceptions, template_rules, welfare, celcom
 app.include_router(auth.router,           prefix="/auth",           tags=["auth"])
 app.include_router(municipalities.router, prefix="/municipalities",  tags=["municipalities"])
 app.include_router(indexes.router,        prefix="/indexes",         tags=["indexes"])
@@ -52,6 +52,7 @@ app.include_router(export_events.router,     prefix="/export-events",       tags
 app.include_router(index_exceptions.router,  prefix="/index-exceptions",    tags=["index-exceptions"])
 app.include_router(template_rules.router,    prefix="/template-rules",      tags=["template-rules"])
 app.include_router(welfare.router,           prefix="/upload/welfare",       tags=["welfare"])
+app.include_router(celcom.router,            prefix="/celcom",               tags=["celcom"])
 @app.get("/health")
 async def health():
     return {"status": "ok", "service": "yomanit-api"}

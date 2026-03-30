@@ -175,7 +175,7 @@ async def list_journal_entries(
     status:  Optional[str] = None,
     limit:   int = 50,
 ):
-    filters = ["je.municipality_id = :muni"]
+    filters = ["je.municipality_id = :muni", "je.is_active = TRUE"]
     values  = {"muni": municipality_id, "limit": limit}
     if period:
         filters.append("je.period = :period"); values["period"] = period
@@ -201,12 +201,14 @@ async def list_journal_entries(
 
 @router.get("/{entry_id}")
 async def get_journal_entry(entry_id: str):
+    print(f"EXPORT ENTRY ID: {entry_id}")
     entry = await get_db().fetch_one(
-        """SELECT je.*, t.display_name AS template_name, m.name AS municipality_name
+        """SELECT je.*, t.display_name AS template_name, t.name AS template_key,
+                  m.name AS municipality_name
            FROM journal_entries je
            JOIN templates t ON t.id = je.template_id
            JOIN municipalities m ON m.id = je.municipality_id
-           WHERE je.id = :id""",
+           WHERE je.id = :id AND je.is_active = TRUE""",
         values={"id": entry_id}
     )
     if not entry:
@@ -291,8 +293,8 @@ async def delete_journal_entry(entry_id: str):
     )
     if not existing:
         raise HTTPException(status_code=404, detail="פקודה לא נמצאה")
-    if existing["status"] in ("exported", "locked"):
-        raise HTTPException(status_code=400, detail="לא ניתן למחוק פקודה מיוצאת או נעולה")
+    if existing["status"] in ("locked",):
+        raise HTTPException(status_code=400, detail="לא ניתן למחוק פקודה נעולה")
 
     async with get_db().transaction():
         await get_db().execute("DELETE FROM journal_lines WHERE entry_id = :id", values={"id": entry_id})
@@ -333,7 +335,12 @@ async def export_journal_entry(entry_id: str):
     billing_period = f"{date_from}-{date_to}" if date_from and date_to else ""
 
     # זיהוי סוג הפקודה
-    template_key = entry.get("template_name_key") or entry.get("template_key") or "bezeq"
+    template_key = (
+        entry.get("template_key") or
+        entry.get("template_name_key") or
+        entry.get("source_type") or
+        "bezeq"
+    )
     is_electricity = template_key == "electricity"
     is_welfare     = template_key == "welfare"
 

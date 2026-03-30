@@ -101,6 +101,7 @@ async def upload_welfare(
         "municipality":  parsed["municipality"],
         "period":        parsed["period"],
         "month":         parsed["month"],
+        "year":          parsed.get("year", 2026),
         "total_rows":    len(rows_out),
         "matched":       len(matched),
         "missing":       len(missing),
@@ -125,11 +126,13 @@ class WelfareLineIn(BaseModel):
     side:        str   # debit | credit
     description: Optional[str] = None
 
+from datetime import datetime as _dt
+
 class WelfareApproveIn(BaseModel):
     municipality_id: str
     period:          str
     month:           int
-    year:            int = 2026
+    year:            int = _dt.now().year
     source_file:     Optional[str] = None
     lines:           List[WelfareLineIn]
 
@@ -264,3 +267,43 @@ async def approve_welfare(payload: WelfareApproveIn):
         "ministry_account": ministry_account,
         "lines_count":   len(payload.lines) + (1 if diff != 0 else 0),
     }
+
+
+# ─────────────────────────────────────────────
+# DELETE /upload/welfare/{entry_id} – מחיקת פקודה
+# ─────────────────────────────────────────────
+@router.delete("/{entry_id}", status_code=200)
+async def delete_welfare_entry(entry_id: str):
+    from main import database
+
+    entry = await database.fetch_one(
+        """SELECT id, reference_num, status, template_id
+           FROM journal_entries
+           WHERE id = :id AND is_active = TRUE""",
+        values={"id": entry_id}
+    )
+    if not entry:
+        raise HTTPException(status_code=404, detail="פקודה לא נמצאה")
+
+    # ווידא שזו פקודת רווחה
+    tmpl = await database.fetch_one(
+        "SELECT name FROM templates WHERE id = :id",
+        values={"id": str(entry["template_id"])}
+    )
+    if not tmpl or tmpl["name"] != "welfare":
+        raise HTTPException(status_code=400, detail="פקודה זו אינה פקודת רווחה")
+
+    if entry["status"] == "exported":
+        raise HTTPException(status_code=400, detail="לא ניתן למחוק פקודה שיוצאה")
+
+    async with database.transaction():
+        await database.execute(
+            "DELETE FROM journal_lines WHERE entry_id = :id",
+            values={"id": entry_id}
+        )
+        await database.execute(
+            "UPDATE journal_entries SET is_active = FALSE WHERE id = :id",
+            values={"id": entry_id}
+        )
+
+    return {"deleted": True, "reference_num": entry["reference_num"]}
