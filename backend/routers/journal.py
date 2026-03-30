@@ -276,7 +276,7 @@ async def update_journal_entry(entry_id: str, payload: JournalEntryUpdate):
                 values={"t": total, "id": entry_id}
             )
 
-    await write_audit(existing["municipality_id"], "UPDATE", "journal_entry", entry_id,
+    await write_audit(str(existing["municipality_id"]), "UPDATE", "journal_entry", entry_id,
                       before={"status": existing["status"]},
                       after={"status": payload.status} if payload.status else None)
     return {"id": entry_id, "updated": True}
@@ -300,7 +300,7 @@ async def delete_journal_entry(entry_id: str):
         await get_db().execute("DELETE FROM journal_lines WHERE entry_id = :id", values={"id": entry_id})
         await get_db().execute("DELETE FROM journal_entries WHERE id = :id",     values={"id": entry_id})
 
-    await write_audit(existing["municipality_id"], "DELETE", "journal_entry", entry_id,
+    await write_audit(str(existing["municipality_id"]), "DELETE", "journal_entry", entry_id,
                       before={"reference_num": existing["reference_num"], "status": existing["status"]})
     return {"deleted": True}
 
@@ -427,7 +427,7 @@ async def export_journal_entry(entry_id: str):
         "UPDATE journal_entries SET status = 'exported' WHERE id = :id AND status IN ('ready', 'draft')",
         values={"id": entry_id}
     )
-    await write_audit(entry["municipality_id"], "EXPORT", "journal_entry", entry_id,
+    await write_audit(str(entry["municipality_id"]), "EXPORT", "journal_entry", entry_id,
                       after={"reference_num": entry["reference_num"]})
 
     buf = io.BytesIO()
