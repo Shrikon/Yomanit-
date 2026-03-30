@@ -1,7 +1,7 @@
 'use client';
 import React, { useState, useEffect } from 'react';
 
-const API = 'http://localhost:8000';
+const API = process.env.NEXT_PUBLIC_API_URL || 'https://yomanit.onrender.com';
 const BEZEQ_TEMPLATE_ID = '34967fa4-a92c-4876-bf73-f6cf05804519';
 
 interface Municipality { id: string; name: string; code: string; }
