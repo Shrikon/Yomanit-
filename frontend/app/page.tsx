@@ -27,7 +27,7 @@ const CATEGORIES = [
 
 const ELEC_TEMPLATE_ID = '5594291d-2a5f-4b6c-846a-bed1290388b1';
 
-function CelcomDashboard({ muni, view, setView }: { muni: any, view: string, setView: (v: string) => void }) {
+function CelcomDashboard({ muni, view, setView }: { muni: any, view: string, setView: (v: 'home' | 'intake' | 'indexes') => void }) {
   const [previewResult, setPreviewResult] = React.useState<any>(null);
   const [loading, setLoading] = React.useState(false);
   const [approving, setApproving] = React.useState(false);
@@ -801,7 +801,6 @@ export default function App() {
             { id: 'bezeq',      label: 'בזק',    icon: '📞', desc: 'קליטת חשבונות בזק',   color: 'bg-blue-50 border-blue-200 hover:border-blue-400' },
             { id: 'welfare',    label: 'רווחה',  icon: '🤝', desc: 'קליטת דוח תמר',       color: 'bg-green-50 border-green-200 hover:border-green-400' },
             { id: 'celcom',     label: 'סלקום',  icon: '📱', desc: 'קליטת חשבונות סלקום', color: 'bg-purple-50 border-purple-200 hover:border-purple-400' },
-            { id: 'leasing',    label: 'ליסינג', icon: '🚗', desc: 'בקרוב',                color: 'bg-gray-50 border-gray-200 opacity-50 cursor-not-allowed' },
           ].map(mod => (
             <button key={mod.id} onClick={() => { setActiveTab(mod.id); setScreen('main'); }}
               className={`border-2 rounded-xl p-5 text-right transition-colors ${mod.color} cursor-pointer`}>
