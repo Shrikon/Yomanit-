@@ -364,8 +364,9 @@ def apply_welfare_splits(parsed: dict) -> Tuple[List[Dict], List[Dict]]:
             missing.append({**row, "error": f"סעיף {row['semel']} לא נמצא ב-INDEX"})
             continue
 
-        # mishrad: חיובי→חובה, שלילי→זכות
-        if row["has_ממשלה"]:
+        # mishrad: שתי תנועות נפרדות, סימן קובע צד
+        # mishrad חיובי → חובה | שלילי → זכות
+        if debit_total != Decimal("0"):
             if debit_total > Decimal("0") and row["debit_account"]:
                 matched.append({
                     "semel":       row["semel"],
@@ -382,28 +383,29 @@ def apply_welfare_splits(parsed: dict) -> Tuple[List[Dict], List[Dict]]:
                     "account":     row["credit_account"],
                     "amount":      float(abs(debit_total)),
                     "side":        "credit",
-                    "description": f"רווחה {row['semel']} {row['name']} (קיזוז)",
+                    "description": f"רווחה {row['semel']} {row['name']}",
                 })
 
-        # zikuy: חיובי→זכות, שלילי→חובה
-        if zikuy > Decimal("0") and row["credit_account"]:
-            matched.append({
-                "semel":       row["semel"],
-                "name":        row["name"],
-                "account":     row["credit_account"],
-                "amount":      float(zikuy),
-                "side":        "credit",
-                "description": f"רווחה {row['semel']} {row['name']}",
-            })
-        elif zikuy < Decimal("0") and row["debit_account"]:
-            matched.append({
-                "semel":       row["semel"],
-                "name":        row["name"],
-                "account":     row["debit_account"],
-                "amount":      float(abs(zikuy)),
-                "side":        "debit",
-                "description": f"רווחה {row['semel']} {row['name']} (תיקון)",
-            })
+        # zikuy חיובי → זכות | שלילי → חובה
+        if zikuy != Decimal("0"):
+            if zikuy > Decimal("0") and row["credit_account"]:
+                matched.append({
+                    "semel":       row["semel"],
+                    "name":        row["name"],
+                    "account":     row["credit_account"],
+                    "amount":      float(zikuy),
+                    "side":        "credit",
+                    "description": f"רווחה {row['semel']} {row['name']}",
+                })
+            elif zikuy < Decimal("0") and row["debit_account"]:
+                matched.append({
+                    "semel":       row["semel"],
+                    "name":        row["name"],
+                    "account":     row["debit_account"],
+                    "amount":      float(abs(zikuy)),
+                    "side":        "debit",
+                    "description": f"רווחה {row['semel']} {row['name']}",
+                })
 
     # שורת חו"ז — מהדוח בלבד, ללא איזון מלאכותי
     # כלל זהב: בדוחות רווחה אין שורת איזון
