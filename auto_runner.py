@@ -122,11 +122,14 @@ def parse_gitonly(text):
     target = None
     commit = "auto commit"
     gitonly = False
+    forcecommit = False
     for line in text.splitlines():
         if line.startswith("TARGET:"):
             target = line.replace("TARGET:", "").strip()
         elif line.startswith("COMMIT:"):
             commit = line.replace("COMMIT:", "").strip()
+        elif line.startswith("FORCECOMMIT:"):
+            forcecommit = line.replace("FORCECOMMIT:", "").strip().lower() == "true"
         elif line.startswith("GITONLY:"):
             gitonly = line.replace("GITONLY:", "").strip().lower() == "true"
     return target, commit, gitonly
