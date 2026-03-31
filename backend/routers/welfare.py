@@ -5,6 +5,7 @@ from decimal import Decimal, ROUND_HALF_UP
 from uuid import uuid4
 import json
 import time
+from index_cache import get_index as get_cached_index
 
 router = APIRouter()
 
@@ -26,7 +27,7 @@ async def upload_welfare(
         raise HTTPException(status_code=400, detail="קובץ ריק")
     print(f"[PERF] READ FILE: {time.time()-t0:.3f}s  size={len(content)} bytes")
 
-    # טען אינדקס מה-DB
+    # טען אינדקס מה-Cache (קריאה אחת ל-DB בלבד לךת אחר cached)
     from main import database as _db
     try:
         t1 = time.time()
@@ -34,33 +35,14 @@ async def upload_welfare(
             "SELECT id FROM templates WHERE name = 'welfare'", values={}
         )
         welfare_tmpl_id = str(welfare_tmpl["id"]) if welfare_tmpl else None
-        
-        index_rows = []
-        if welfare_tmpl_id:
-            index_rows = await _db.fetch_all(
-                """SELECT key_value, account_code, description
-                   FROM indexes
-                   WHERE municipality_id = :muni AND template_id = :tmpl AND active = TRUE""",
-                values={"muni": municipality_id, "tmpl": welfare_tmpl_id}
-            )
-        print(f"[PERF] DB INDEX LOAD: {time.time()-t1:.3f}s  rows={len(index_rows)}")
-        
-        # בנה index_map: semel → {debit: account, credit: account}
-        t2 = time.time()
+
         index_map = {}
-        for row in index_rows:
-            semel = row["key_value"]
-            acct  = row["account_code"]
-            side  = row["description"]  # 'debit' או 'credit'
-            if semel not in index_map:
-                index_map[semel] = {}
-            if side in ("debit", "credit"):
-                index_map[semel][side] = acct
-        print(f"[PERF] BUILD INDEX_MAP: {time.time()-t2:.3f}s  entries={len(index_map)}")
-        
-        # אם אין אינדקס ב-DB – השתמש בברירת מחדל
+        if welfare_tmpl_id:
+            index_map = await get_cached_index(municipality_id, welfare_tmpl_id, _db)
+        print(f"[PERF] INDEX (cached): {time.time()-t1:.3f}s  entries={len(index_map)}")
+
         use_index = index_map if index_map else None
-        
+
     except Exception:
         use_index = None
 
