@@ -1,6 +1,7 @@
 # index_cache.py – מטמון מרכזי לאינדקסים
 # מבטיח קריאה אחת ל-DB לכל municipality+template (לא לפי request)
 # נרמול semel: חד-כיווני 7→6 בלבד, אף פעם לא 6→7
+# keys עם תווים עבריים (כגון 'חוז') נכנסים ישירות ללא נרמול
 import asyncio
 import logging
 from typing import Dict, Tuple
@@ -16,16 +17,27 @@ def _semel_variants(raw) -> list:
     מייצר variants בטוחים בלבד — חד-כיווני 7→6.
     DB: 1038100 (7 ספרות) → ['1038100', '038100']
     DB: 242410  (6 ספרות) → ['242410']
-    כלל: רק הקטנה, לא הרחבה — מונע false matches עתידיים.
+    DB: 'חוז'  (עברית)   → ['חוז'] (ישירות, ללא נרמול)
+    כלל: רק הקטנה, לא הרחבה.
     """
     if raw is None:
         return []
     s = str(raw).strip()
-    if s.endswith('.0'):
-        s = s[:-2]
-    s = ''.join(c for c in s if c.isdigit())
     if not s:
         return []
+
+    # key עברי / לא-מספרי — נכנס ישירות ללא נרמול
+    digits = ''.join(c for c in s if c.isdigit())
+    if len(digits) < len(s) * 0.8:
+        return [s]
+
+    # key מספרי — נרמול רגיל
+    if s.endswith('.0'):
+        s = s[:-2]
+    s = digits
+    if not s:
+        return []
+
     variants = [s]
     # אם 7 ספרות ומתחיל ב-1 → גרסה מקוצרת ללא ה-1
     if len(s) == 7 and s.startswith('1'):
@@ -65,7 +77,7 @@ async def get_index(municipality_id: str, template_id: str, db) -> dict:
                 if semel not in index_map:
                     index_map[semel] = {}
 
-                # בדיקת conflict — אזהרה אם אותו צד נדרס בערך שונה
+                # בדיקת conflict
                 if side in index_map[semel] and index_map[semel][side] != acct:
                     logger.warning(
                         f"[INDEX_CACHE] conflict semel={semel} side={side}: "
@@ -74,14 +86,13 @@ async def get_index(municipality_id: str, template_id: str, db) -> dict:
 
                 index_map[semel][side] = acct
 
-                # trace כשמשתמשים ב-variant מקוצר
                 if semel != variants[0]:
-                    logger.debug(
-                        f"[INDEX_CACHE] variant: {variants[0]} → {semel}"
-                    )
+                    logger.debug(f"[INDEX_CACHE] variant: {variants[0]} → {semel}")
 
-        # בדיקת שלמות mapping — semel ללא שני הצדדים
+        # בדיקת שלמות mapping
         for semel, sides in index_map.items():
+            if semel == "חוז":
+                continue  # חוז צריך רק credit
             if "debit" not in sides or "credit" not in sides:
                 logger.warning(
                     f"[INDEX_CACHE] incomplete mapping semel={semel} "
@@ -97,12 +108,10 @@ async def get_index(municipality_id: str, template_id: str, db) -> dict:
 
 
 def invalidate(municipality_id: str, template_id: str) -> None:
-    """מנקה cache לאחר עדכון אינדקס."""
     _cache.pop((str(municipality_id), str(template_id)), None)
     logger.debug(f"[INDEX_CACHE] invalidated {str(municipality_id)[:8]}...")
 
 
 def clear_all() -> None:
-    """מנקה את כל ה-cache (לטסטים)."""
     _cache.clear()
     logger.debug("[INDEX_CACHE] cleared all")
