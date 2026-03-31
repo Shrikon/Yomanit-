@@ -1164,6 +1164,7 @@ export default function App() {
                   setWelfareAddError('');
                   if(!welfareNewRow.key_value||!welfareNewRow.credit){setWelfareAddError('סמל וחשבון זכות הם שדות חובה');return;}
                   try{
+                    if(!muni) return;
                     if(welfareNewRow.debit) await apiFetch('/indexes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({municipality_id:muni.id,template_id:'95b37d2d-c9ea-4ef1-9164-ab5ac642b0c7',key_value:welfareNewRow.key_value.trim(),account_code:welfareNewRow.debit.trim(),description:'debit',connection_name:welfareNewRow.name.trim()})});
                     await apiFetch('/indexes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({municipality_id:muni.id,template_id:'95b37d2d-c9ea-4ef1-9164-ab5ac642b0c7',key_value:welfareNewRow.key_value.trim(),account_code:welfareNewRow.credit.trim(),description:'credit',connection_name:welfareNewRow.name.trim()})});
                     setWelfareNewRow({key_value:'',debit:'',credit:'',name:''});
