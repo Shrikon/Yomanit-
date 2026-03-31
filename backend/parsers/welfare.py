@@ -354,6 +354,7 @@ def parse_welfare(content: bytes, month: int = None, index_map: Dict[str, Dict] 
         "summary_choz":    float(summary_choz)    if summary_choz    else None,
         "reconciliation":  reconciliation,
         "balance_ok":      reconciliation.get("status") == "balanced" if reconciliation else True,
+        "_welfare_index":  welfare_index,  # מעביר ל-apply_welfare_splits לשליפת חשבון חו"ז
     }
 
 
@@ -412,37 +413,23 @@ def apply_welfare_splits(parsed: dict) -> tuple:
                     "description": f"רווחה {row['semel']} {row['name']}",
                 })
 
-    # חו"ז מהדוח
+    # חו"ז — חשבון נשלף מה-index_map לפי key 'חוז'
+    # לא hardcoded — כל רשות מגדירה חשבון חו"ז משלה ב-DB
     summary_choz = parsed.get("summary_choz")
     if summary_choz and Decimal(str(summary_choz)) > Decimal("0"):
-        matched.append({
-            "semel":       "חוז",
-            "name":        'חו"ז משרד הרווחה',
-            "account":     "700000000",
-            "amount":      float(Decimal(str(summary_choz))),
-            "side":        "credit",
-            "description": 'חו"ז משרד הרווחה',
-        })
-
-    # gap מגיע מה-parser בלבד — לא מחשבים מחדש (מניעת כפילות חישוב)
-    recon = parsed.get("reconciliation", {})
-    gap   = recon.get("gap", Decimal("0"))
-    if not isinstance(gap, Decimal):
-        gap = Decimal(str(gap))
-
-    print(f"[BALANCE] gap from parser={gap} status={recon.get('status', 'unknown')}")
-
-    if gap >= Decimal("1"):
-        # הגנה מפני כפילות שורת השלמה
-        if not any(r.get("semel") == "השלמה" for r in matched):
+        welfare_index = parsed.get("_welfare_index", {})
+        choz_account = welfare_index.get("חוז", {}).get("credit", "")
+        if not choz_account:
+            print(f"[WELFARE] WARNING: no 'חוז' entry in index_map — skipping choz line")
+        else:
             matched.append({
-                "semel":       "השלמה",
-                "name":        "השלמת הכנסות ממשרד הרווחה",
-                "account":     WELFARE_INCOME_ACCOUNT,
-                "amount":      float(gap),
+                "semel":       "חוז",
+                "name":        'חו"ז משרד הרווחה',
+                "account":     choz_account,
+                "amount":      float(Decimal(str(summary_choz))),
                 "side":        "credit",
-                "description": "השלמת הכנסות ממשרד הרווחה",
+                "description": 'חו"ז משרד הרווחה',
             })
-            print(f"[BALANCE FIX] added credit line amount={gap} account={WELFARE_INCOME_ACCOUNT}")
+            print(f"[BALANCE] choz line: account={choz_account} amount={summary_choz}")
 
     return matched, missing
