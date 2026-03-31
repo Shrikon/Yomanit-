@@ -427,9 +427,9 @@ def apply_welfare_splits(parsed: dict) -> tuple:
                 "name":        'חו"ז משרד הרווחה',
                 "account":     choz_account,
                 "amount":      float(Decimal(str(summary_choz))),
-                "side":        "credit",
+                "side":        "debit",
                 "description": 'חו"ז משרד הרווחה',
             })
-            print(f"[BALANCE] choz line: account={choz_account} amount={summary_choz}")
+            print(f"[BALANCE] choz line: account={choz_account} amount={summary_choz} side=debit")
 
     return matched, missing
