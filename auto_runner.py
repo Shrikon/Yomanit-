@@ -76,17 +76,21 @@ def safe_write(path, new_content):
     print(f"✓ נכתב: {path}")
 
 
-def git_commit_push_all(commit_message):
+def git_commit_push_all(commit_message, allow_empty=False):
     r1 = subprocess.run(["git", "status", "--porcelain"], cwd=REPO_PATH, capture_output=True, text=True)
 
-    if not r1.stdout.strip():
+    if not r1.stdout.strip() and not allow_empty:
         print("אין שינויים ל-commit")
         return
 
     subprocess.run(["git", "add", "."], cwd=REPO_PATH)
 
+    commit_cmd = ["git", "commit", "-m", commit_message]
+    if allow_empty:
+        commit_cmd = ["git", "commit", "--allow-empty", "-m", commit_message]
+
     r2 = subprocess.run(
-        ["git", "commit", "-m", commit_message],
+        commit_cmd,
         cwd=REPO_PATH,
         capture_output=True,
         text=True
@@ -147,17 +151,19 @@ def process_once():
         try:
             target, commit, gitonly, forcecommit = parse_gitonly(content)
 
-            if gitonly or forcecommit:
-                validate_path(target)
-                print(f"\n→ GITONLY TARGET: {target}")
-                print(f"→ COMMIT: {commit}")
+            if forcecommit:
                 timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
-                # add the specific file first, then force empty commit if needed
-                subprocess.run(["git", "add", target], cwd=REPO_PATH)
-                r2 = subprocess.run(["git", "commit", "--allow-empty", "-m", f"{commit} | {timestamp}"], cwd=REPO_PATH, capture_output=True, text=True)
-                r3 = subprocess.run(["git", "push"], cwd=REPO_PATH, capture_output=True, text=True)
-                print(f"git commit: {r2.stdout.strip()}")
-                print(f"git push:   {r3.returncode}")
+                print("\n→ FORCE COMMIT")
+                git_commit_push_all(f"{commit} | {timestamp}", allow_empty=True)
+                os.remove(full_path)
+                print(f"✓ FORCECOMMIT הושלם — {file_name} נמחק\n")
+                return True
+
+            if gitonly:
+                validate_path(target)
+                timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+                print(f"\n→ GITONLY TARGET: {target}")
+                git_commit_push_all(f"{commit} | {timestamp}")
                 os.remove(full_path)
                 print(f"✓ GITONLY הושלם — {file_name} נמחק\n")
                 return True
@@ -192,8 +198,6 @@ def process_once():
             return False
 
     else:
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
-        git_commit_push_all(f"auto: sync changes | {timestamp}")
         return False
 
 
