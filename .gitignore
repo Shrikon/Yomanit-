@@ -1,1 +1,9 @@
-backend/.env
+ai_inbox/
+ai_inbox/errors/
+*.bak
+run_git_command.py
+__pycache__/
+*.pyc
+.env
+node_modules/
+.next/
