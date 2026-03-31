@@ -734,7 +734,7 @@ export default function App() {
     welfare: [
       { label: 'דשבורד', view: 'home', icon: '📊' },
       { label: 'קליטת דוח', view: 'intake', icon: '📂' },
-      { label: 'עדכון אינדקס', view: 'indexes', icon: '📋' },
+      { label: 'עדכון אינדקס', view: 'indexes', icon: '📋' }, // welfare-index
     ],
     celcom: [
       { label: 'דשבורד', view: 'home', icon: '📊' },
