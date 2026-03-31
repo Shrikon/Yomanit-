@@ -41,9 +41,18 @@ async def upload_welfare(
             index_map = await get_cached_index(municipality_id, welfare_tmpl_id, _db)
         print(f"[PERF] INDEX (cached): {time.time()-t1:.3f}s  entries={len(index_map)}")
 
+        if index_map:
+            print(f"[INDEX] SOURCE=DB  entries={len(index_map)}")
+            for semel_check in ["721060", "722020", "242410"]:
+                val = index_map.get(semel_check)
+                print(f"[INDEX] semel={semel_check} → {val}")
+        else:
+            print(f"[INDEX] SOURCE=STATIC (DB index_map empty!)")
+
         use_index = index_map if index_map else None
 
-    except Exception:
+    except Exception as e:
+        print(f"[INDEX] ERROR loading index: {e}")
         use_index = None
 
     try:

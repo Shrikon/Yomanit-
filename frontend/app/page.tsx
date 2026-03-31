@@ -1060,6 +1060,35 @@ export default function App() {
                       <span>חובה: ₪{welfareResult.total_debit?.toLocaleString()}</span>
                     </div>
                   </div>
+                  {!welfareResult.can_approve && welfareResult.missing_index?.length > 0 && (
+                    <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-4">
+                      <div className="font-semibold text-red-700 text-sm mb-2">
+                        ⚠️ סעיפים חסרים באינדקס — יש לעדכן לפני יצירת הפקודה
+                      </div>
+                      <div className="text-xs text-red-600 mb-3">עבור למסך &quot;עדכון אינדקס&quot; והוסף את הסעיפים הבאים:</div>
+                      <table className="w-full text-xs">
+                        <thead>
+                          <tr className="text-red-500 border-b border-red-200">
+                            <th className="text-right pb-1">סמל סעיף</th>
+                            <th className="text-right pb-1">שם סעיף</th>
+                            <th className="text-right pb-1">סכום</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {welfareResult.missing_index.map((r: any) => (
+                            <tr key={r.semel} className="border-b border-red-100">
+                              <td className="py-1 font-mono text-red-700">{r.semel}</td>
+                              <td className="py-1 text-red-600">{r.name}</td>
+                              <td className="py-1 text-red-600">₪{(parseFloat(r.debit_total || r.zikuy_hodesh || 0)).toLocaleString()}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                      <div className="mt-3 text-xs text-red-500 font-medium">
+                        סה&quot;כ {welfareResult.missing_index.length} סעיפים חסרים — הפקודה חסומה עד להשלמתם
+                      </div>
+                    </div>
+                  )}
                   <div className="flex gap-3">
                     <button onClick={() => { setWelfareResult(null); setError(''); }} className="border border-gray-200 rounded-lg px-4 py-2 text-sm">קובץ חדש</button>
                     <button disabled={!welfareResult.can_approve || welfareLoading}
@@ -1075,7 +1104,7 @@ export default function App() {
                         finally { setWelfareLoading(false); }
                       }}
                       className="bg-green-600 text-white rounded-lg px-6 py-2 text-sm disabled:opacity-40">
-                      {welfareLoading ? 'שומר...' : 'צור פקודת יומן ✓'}
+                      {welfareLoading ? 'שומר...' : welfareResult.can_approve ? 'צור פקודת יומן ✓' : `חסרים ${welfareResult.missing_index?.length || ''} סעיפים באינדקס`}
                     </button>
                   </div>
                 </div>
