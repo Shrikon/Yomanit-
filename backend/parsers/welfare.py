@@ -1,2 +1,2 @@
 
-print("automation works")
+print("hello from auto runner")
