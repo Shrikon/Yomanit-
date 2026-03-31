@@ -1,11 +1,11 @@
 # parsers/welfare.py – פרסר קובץ רווחה גולמי (תמר)
-# לוגיקה:
-# חובה = רק שורות תשלומי ממשלה (סכום כל השורות לאותו סעיף) + יש debit ב-INDEX
-# זכות = זיכוי/חיוב בחודש זה מהשורה הריקה + יש credit ב-INDEX
+# כלל זהב: אם הועבר index_map מה-DB — משתמשים בו בלבד. אין fallback לסטטי.
+# איזון: gap = summary_mishrad - total_credit (source of truth: parser בלבד)
+# שורת השלמה לחשבון 1340000000 רק אם gap > 0
 
 import io
 from decimal import Decimal, ROUND_HALF_UP, InvalidOperation
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Tuple, Optional
 import pandas as pd
 
 
@@ -13,6 +13,7 @@ class WelfareParserError(Exception):
     pass
 
 
+# WELFARE_INDEX — reference בלבד. לא בשימוש אם הועבר index_map מה-DB.
 WELFARE_INDEX = {
     "120211": {"debit": "1849999783", "credit": "1342212930"},
     "120214": {"credit": "1342212930"},
@@ -100,8 +101,11 @@ WELFARE_INDEX = {
     "1175370": {"debit": "1848401840", "credit": "1348401930"},
 }
 
+# חשבון הכנסות כללי מממשלה — לשורת השלמה בלבד כאשר יש פער
+WELFARE_INCOME_ACCOUNT = "1340000000"
 
-def _extract_semel(value):
+
+def _extract_semel(value) -> Optional[str]:
     if value is None:
         return None
     s = str(value).strip()
@@ -132,8 +136,25 @@ def _validate_welfare_format(sheets: dict) -> None:
         )
 
 
+def _lookup_index(semel: str, welfare_index: dict, index_source: str) -> dict:
+    result = welfare_index.get(semel, {})
+    if result:
+        print(f"[LOOKUP] semel={semel} FOUND ({index_source}) debit={result.get('debit','—')} credit={result.get('credit','—')}")
+    else:
+        print(f"[LOOKUP] semel={semel} MISSING ({index_source})")
+    return result
+
+
 def parse_welfare(content: bytes, month: int = None, index_map: Dict[str, Dict] = None) -> Dict[str, Any]:
-    welfare_index = index_map if index_map is not None else WELFARE_INDEX
+    if index_map is not None:
+        welfare_index = index_map
+        index_source = f"DB ({len(index_map)} entries)"
+        print(f"[INDEX] SOURCE=DB  entries={len(index_map)}")
+    else:
+        welfare_index = WELFARE_INDEX
+        index_source = "STATIC"
+        print(f"[INDEX] SOURCE=STATIC (no index_map provided)")
+
     try:
         sheets = pd.read_excel(io.BytesIO(content), sheet_name=None, header=None)
     except Exception as e:
@@ -213,6 +234,7 @@ def parse_welfare(content: bytes, month: int = None, index_map: Dict[str, Dict] 
     summary_choz    = _find_summary_value(KEYWORDS_CHOZ)
 
     semel_data: Dict[str, dict] = {}
+    EXCLUDE_MASLUL = ['המחאות', 'שטרם נפדו', 'מסר']
 
     for i in range(header_row_idx + 1, len(df)):
         row = df.iloc[i]
@@ -237,7 +259,6 @@ def parse_welfare(content: bytes, month: int = None, index_map: Dict[str, Dict] 
                 'zikuy':       0,
             }
 
-        EXCLUDE_MASLUL = ['המחאות', 'שטרם נפדו', 'מסר']
         if (maslul and maslul.strip() != '' and
                 'רשות' not in maslul and
                 'ילדי חוץ' not in maslul and
@@ -265,7 +286,7 @@ def parse_welfare(content: bytes, month: int = None, index_map: Dict[str, Dict] 
 
     rows = []
     for semel, data in semel_data.items():
-        idx = welfare_index.get(semel, {})
+        idx = _lookup_index(semel, welfare_index, index_source)
         rows.append({
             "semel":         semel,
             "name":          data['name'],
@@ -277,23 +298,51 @@ def parse_welfare(content: bytes, month: int = None, index_map: Dict[str, Dict] 
             "in_index":      bool(idx),
         })
 
-    total_debit  = sum(r['debit_total']         for r in rows if r['debit_account'] and r['has_ממשלה'])
-    total_credit = sum(abs(r['zikuy_hodesh'])    for r in rows if r['credit_account'] and r['zikuy_hodesh'] != 0)
+    total_debit  = sum(r['debit_total']       for r in rows if r['debit_account'] and r['has_ממשלה'])
+    total_credit = sum(abs(r['zikuy_hodesh']) for r in rows if r['credit_account'] and r['zikuy_hodesh'] != 0)
+    missing_index = [r for r in rows if not r['in_index'] and (r['debit_total'] > 0 or r['zikuy_hodesh'] != 0)]
+
+    # חישוב gap — source of truth יחיד. split לא מחשב מחדש.
+    reconciliation: Dict[str, Any] = {}
+    if summary_mishrad:
+        sm  = Decimal(str(summary_mishrad))
+        gap = sm - total_credit
+        if gap < Decimal("0"):
+            raise WelfareParserError(
+                f"שגיאת שלמות נתונים: סכום הזיכויים ({float(total_credit):.2f}) "
+                f"עולה על summary_mishrad ({float(sm):.2f}). פער: {float(gap):.2f}"
+            )
+        status = "balanced" if gap < Decimal("1") else "missing_index"
+        reconciliation = {
+            "summary_mishrad":      sm,
+            "total_indexed_credit": total_credit,
+            "gap":                  gap,
+            "status":               status,
+        }
+        print(f"[RECONCILE] summary={sm} indexed_credit={total_credit} gap={gap} status={status}")
+        if gap >= Decimal("1"):
+            print(f"[RECONCILE] GAP={gap} — {len(missing_index)} missing index entries")
+
+    if missing_index:
+        print(f"[INDEX] MISSING COUNT={len(missing_index)}")
+        for r in missing_index:
+            print(f"  MISSING semel={r['semel']} name={r['name']}")
 
     return {
-        "municipality":  municipality,
-        "period":        period_label,
-        "month":         period_month,
-        "year":          period_year,
-        "rows":          rows,
-        "total_rows":    len([r for r in rows if r['debit_total'] != 0 or r['zikuy_hodesh'] != 0]),
-        "missing_index": [r for r in rows if not r['in_index'] and (r['debit_total'] > 0 or r['zikuy_hodesh'] != 0)],
-        "row_errors":    [],
-        "total_debit":   float(total_debit),
-        "total_credit":  float(total_credit),
+        "municipality":    municipality,
+        "period":          period_label,
+        "month":           period_month,
+        "year":            period_year,
+        "rows":            rows,
+        "total_rows":      len([r for r in rows if r['debit_total'] != 0 or r['zikuy_hodesh'] != 0]),
+        "missing_index":   missing_index,
+        "row_errors":      [],
+        "total_debit":     float(total_debit),
+        "total_credit":    float(total_credit),
         "summary_mishrad": float(summary_mishrad) if summary_mishrad else float(total_debit),
         "summary_choz":    float(summary_choz)    if summary_choz    else None,
-        "balance_ok":    True,
+        "reconciliation":  reconciliation,
+        "balance_ok":      reconciliation.get("status") == "balanced" if reconciliation else True,
     }
 
 
@@ -352,6 +401,7 @@ def apply_welfare_splits(parsed: dict) -> tuple:
                     "description": f"רווחה {row['semel']} {row['name']}",
                 })
 
+    # חו"ז מהדוח
     summary_choz = parsed.get("summary_choz")
     if summary_choz and Decimal(str(summary_choz)) > Decimal("0"):
         matched.append({
@@ -363,11 +413,25 @@ def apply_welfare_splits(parsed: dict) -> tuple:
             "description": 'חו"ז משרד הרווחה',
         })
 
-    summary_mishrad = parsed.get("summary_mishrad")
-    if summary_mishrad and summary_choz:
-        total_credit = sum(Decimal(str(r["amount"])) for r in matched if r["side"] == "credit")
-        gap = abs(total_credit - Decimal(str(summary_mishrad)))
-        if gap > Decimal("1"):
-            print(f"[WELFARE] WARNING: credit gap = {gap} (total_credit={total_credit}, mishrad={summary_mishrad})")
+    # gap מגיע מה-parser בלבד — לא מחשבים מחדש (מניעת כפילות חישוב)
+    recon = parsed.get("reconciliation", {})
+    gap   = recon.get("gap", Decimal("0"))
+    if not isinstance(gap, Decimal):
+        gap = Decimal(str(gap))
+
+    print(f"[BALANCE] gap from parser={gap} status={recon.get('status', 'unknown')}")
+
+    if gap >= Decimal("1"):
+        # הגנה מפני כפילות שורת השלמה
+        if not any(r.get("semel") == "השלמה" for r in matched):
+            matched.append({
+                "semel":       "השלמה",
+                "name":        "השלמת הכנסות ממשרד הרווחה",
+                "account":     WELFARE_INCOME_ACCOUNT,
+                "amount":      float(gap),
+                "side":        "credit",
+                "description": "השלמת הכנסות ממשרד הרווחה",
+            })
+            print(f"[BALANCE FIX] added credit line amount={gap} account={WELFARE_INCOME_ACCOUNT}")
 
     return matched, missing
