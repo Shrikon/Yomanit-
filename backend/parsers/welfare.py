@@ -106,6 +106,14 @@ WELFARE_INCOME_ACCOUNT = "1340000000"
 
 
 def _extract_semel(value) -> Optional[str]:
+    """
+    מחלץ סמל סעיף מתא בקובץ.
+    פורמט בקובץ: [6 ספרות קידומת רשות][N ספרות סעיף]
+    דוגמאות:
+      230090242410 -> 242410   (6 ספרות סעיף)
+      2300901038410 -> 1038410  (7 ספרות סעיף)
+      2300901175320 -> 1175320  (7 ספרות סעיף)
+    """
     if value is None:
         return None
     s = str(value).strip()
@@ -114,8 +122,11 @@ def _extract_semel(value) -> Optional[str]:
     s = "".join(ch for ch in s if ch.isdigit())
     if not s:
         return None
-    if len(s) > 9:
-        s = s[6:]
+    # קידומת רשות = תמיד 6 ספרות (23009X)
+    # סעיף = 6 או 7 ספרות
+    # סה"כ אורך: 12 או 13 ספרות
+    if len(s) >= 12:
+        s = s[6:]  # הסר 6 ספרות קידומת רשות
     return s
 
 
