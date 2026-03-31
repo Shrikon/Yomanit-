@@ -4,6 +4,7 @@ from parsers.welfare import parse_welfare, apply_welfare_splits, WelfareParserEr
 from decimal import Decimal, ROUND_HALF_UP
 from uuid import uuid4
 import json
+import time
 
 router = APIRouter()
 
@@ -19,13 +20,16 @@ async def upload_welfare(
     municipality_id: str        = Form(...),
     month:           int        = Form(None),
 ):
+    t0 = time.time()
     content = await file.read()
     if not content:
         raise HTTPException(status_code=400, detail="קובץ ריק")
+    print(f"[PERF] READ FILE: {time.time()-t0:.3f}s  size={len(content)} bytes")
 
     # טען אינדקס מה-DB
     from main import database as _db
     try:
+        t1 = time.time()
         welfare_tmpl = await _db.fetch_one(
             "SELECT id FROM templates WHERE name = 'welfare'", values={}
         )
@@ -39,8 +43,10 @@ async def upload_welfare(
                    WHERE municipality_id = :muni AND template_id = :tmpl AND active = TRUE""",
                 values={"muni": municipality_id, "tmpl": welfare_tmpl_id}
             )
+        print(f"[PERF] DB INDEX LOAD: {time.time()-t1:.3f}s  rows={len(index_rows)}")
         
         # בנה index_map: semel → {debit: account, credit: account}
+        t2 = time.time()
         index_map = {}
         for row in index_rows:
             semel = row["key_value"]
@@ -50,6 +56,7 @@ async def upload_welfare(
                 index_map[semel] = {}
             if side in ("debit", "credit"):
                 index_map[semel][side] = acct
+        print(f"[PERF] BUILD INDEX_MAP: {time.time()-t2:.3f}s  entries={len(index_map)}")
         
         # אם אין אינדקס ב-DB – השתמש בברירת מחדל
         use_index = index_map if index_map else None
@@ -58,13 +65,18 @@ async def upload_welfare(
         use_index = None
 
     try:
+        t3 = time.time()
         parsed = parse_welfare(content, month=month, index_map=use_index)
+        print(f"[PERF] PARSE_WELFARE: {time.time()-t3:.3f}s  rows={parsed.get('total_rows')}")
     except WelfareParserError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"שגיאת פרסור: {str(e)}")
 
+    t4 = time.time()
     matched, missing = apply_welfare_splits(parsed)
+    print(f"[PERF] APPLY_SPLITS: {time.time()-t4:.3f}s  matched={len(matched)} missing={len(missing)}")
+    print(f"[PERF] TOTAL: {time.time()-t0:.3f}s")
 
     # בנה שורות תצוגה
     rows_out = []
