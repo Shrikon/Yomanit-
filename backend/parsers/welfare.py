@@ -1,20 +1,28 @@
 # parsers/welfare.py – פרסר קובץ רווחה גולמי (תמר)
-# Performance: openpyxl read_only=True במקום pandas
-import io, re, datetime
+# לוגיקה:
+# חובה = רק שורות תשלומי ממשלה (סכום כל השורות לאותו סעיף) + יש debit ב-INDEX
+# זכות = זיכוי/חיוב בחודש זה מהשורה הריקה + יש credit ב-INDEX
+
+import io
 from decimal import Decimal, ROUND_HALF_UP, InvalidOperation
 from typing import List, Dict, Any, Tuple
-from openpyxl import load_workbook
+import pandas as pd
 
 
 class WelfareParserError(Exception):
     pass
 
 
+# ── INDEX: סמל סעיף → קודי חשבון ──────────────────────────────────────────
+# debit  = תקציב חובה (רק לסעיפים עם תשלומי ממשלה)
+# credit = תקציב זכות
 WELFARE_INDEX = {
+    # ── חירום ──────────────────────────────────────────────────────
     "120211": {"debit": "1849999783", "credit": "1342212930"},
     "120214": {"credit": "1342212930"},
     "120217": {"debit": "1842203840", "credit": "1342203930"},
     "120218": {"credit": "1342212930"},
+    # ── אזרחים ותיקים וניצולי שואה ─────────────────────────────────
     "242410": {"debit": "1844301840", "credit": "1344301930"},
     "243410": {"debit": "1844409750", "credit": "1344409930"},
     "243415": {"debit": "1844419840", "credit": "1344416930"},
@@ -24,6 +32,7 @@ WELFARE_INDEX = {
     "243420": {"credit": "1344409930"},
     "243430": {"debit": "1844414840", "credit": "1344414930"},
     "243438": {"debit": "1844408840", "credit": "1344408930"},
+    # ── כוח אדם ────────────────────────────────────────────────────
     "513410": {"credit": "1341000930"},
     "513411": {"credit": "1341201930"},
     "513412": {"credit": "1341201930"},
@@ -32,6 +41,7 @@ WELFARE_INDEX = {
     "513423": {"credit": "1341004930"},
     "513440": {"credit": "1341003930"},
     "513441": {"credit": "1341001930"},
+    # ── נכים ושיקום ─────────────────────────────────────────────
     "721010": {"debit": "1846501840", "credit": "1346501930"},
     "721011": {"debit": "1846502840", "credit": "1346502930"},
     "721012": {"debit": "1846100840", "credit": "1346100930"},
@@ -68,6 +78,7 @@ WELFARE_INDEX = {
     "723670": {"debit": "1845502840", "credit": "1345502930"},
     "723671": {"debit": "1845503840", "credit": "1345503930"},
     "723820": {"debit": "1845601840", "credit": "1345601930"},
+    # ── ילדים ומשפחה ────────────────────────────────────────────
     "1038100": {"debit": "1847101840", "credit": "1347101930"},
     "1038400": {"debit": "1847201840", "credit": "1347201930"},
     "1038405": {"debit": "1847202840", "credit": "1347202930"},
@@ -99,73 +110,60 @@ WELFARE_INDEX = {
 
 
 def _extract_semel(raw: str) -> str:
-    s = str(raw).strip().split('.')[0]
-    return s.replace(' ', '').replace('\u200b', '')
+    """מחלץ מספר סעיף מהתא — מסיר נקודות ורווחים."""
+    s = str(raw).strip()
+    s = s.split('.')[0]
+    s = s.replace(' ', '').replace('\u200b', '')
+    return s
 
 
 def _to_decimal(val) -> Decimal:
     try:
-        if val is None:
-            return Decimal("0")
-        if isinstance(val, float) and (val != val):
+        if val is None or (isinstance(val, float) and pd.isna(val)):
             return Decimal("0")
         return Decimal(str(val)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     except (InvalidOperation, TypeError):
         return Decimal("0")
 
 
+def _validate_welfare_format(sheets: dict) -> None:
+    if "דוח התחשבנות" not in sheets and "גרסה להדפסה" not in sheets:
+        raise WelfareParserError(
+            "קובץ לא תקני – חסר sheet 'דוח התחשבנות'. "
+            "יש להעלות קובץ דוח התחשבנות רווחה (תמר)"
+        )
+
+
 def parse_welfare(content: bytes, month: int = None, index_map: Dict[str, Dict] = None) -> Dict[str, Any]:
     welfare_index = index_map if index_map is not None else WELFARE_INDEX
-
     try:
-        wb = load_workbook(io.BytesIO(content), read_only=True, data_only=True)
+        sheets = pd.read_excel(io.BytesIO(content), sheet_name=None, header=None)
     except Exception as e:
         raise WelfareParserError(f"לא ניתן לקרוא את הקובץ: {e}")
 
-    sheet_name = None
-    for name in wb.sheetnames:
-        if 'דוח התחשבנות' in name or 'גרסה להדפסה' in name:
-            sheet_name = name
-            break
-    if not sheet_name:
-        wb.close()
-        raise WelfareParserError("קובץ לא תקני – חסר sheet 'דוח התחשבנות'")
+    _validate_welfare_format(sheets)
 
-    ws = wb[sheet_name]
-    rows_raw = list(ws.iter_rows(values_only=True))
-    wb.close()
+    sheet_name = "דוח התחשבנות" if "דוח התחשבנות" in sheets else "גרסה להדפסה"
+    df = sheets[sheet_name]
 
-    def _cell(row, col):
-        if col is None or col >= len(row):
-            return None
-        return row[col]
-
-    def _s(val):
-        return '' if val is None else str(val).strip()
-
-    def _f(val):
-        if val is None:
-            return 0.0
-        try:
-            return float(val)
-        except (ValueError, TypeError):
-            return 0.0
-
+    # שם רשות
     municipality = ""
-    for row in rows_raw[:8]:
-        for v in row:
-            s = _s(v)
-            if any(x in s for x in ['מ. א', 'מועצה', 'עיריית', 'מ.א', 'מ.מ']):
-                municipality = s
+    for i in range(min(8, len(df))):
+        for j in range(len(df.columns)):
+            v = str(df.iloc[i, j])
+            if any(x in v for x in ['מ. א', 'מועצה', 'עיריית', 'מ.א', 'מ.מ']):
+                municipality = v.strip()
                 break
 
+    # חודש ושנה
     period_label = ""
     period_month = month
     period_year  = None
-    for row in rows_raw[:8]:
-        for v in row:
-            s = _s(v)
-            m = re.search(r'תשלום לחודש\s*(\d+)/(\d{4})', s)
+    import re
+    for i in range(min(8, len(df))):
+        for j in range(len(df.columns)):
+            v = str(df.iloc[i, j])
+            m = re.search(r'תשלום לחודש\s*(\d+)/(\d{4})', v)
             if m:
                 period_month = int(m.group(1))
                 period_year  = int(m.group(2))
@@ -175,21 +173,24 @@ def parse_welfare(content: bytes, month: int = None, index_map: Dict[str, Dict] 
     if period_month is None:
         period_month = 1
     if period_year is None:
+        import datetime
         period_year = datetime.datetime.now().year
 
+    # מצא שורת headers + סיכומים
     header_row_idx = None
     col_semel = col_name = col_maslul = col_total = col_zikuy = None
-    summary_mishrad = summary_choz = None
+    summary_mishrad = None
+    summary_choz    = None
 
-    for i, row in enumerate(rows_raw[:15]):
-        vals = [_s(v) for v in row]
-        if 'חיוב בחודש זה' in vals:
+    for i in range(min(15, len(df))):
+        row_vals = [str(v).strip() for v in df.iloc[i].tolist()]
+        if 'חיוב בחודש זה' in row_vals:
             header_row_idx = i
-            col_semel  = next((j for j, v in enumerate(vals) if 'סמל הסעיף' in v), None)
-            col_name   = next((j for j, v in enumerate(vals) if v == 'שם סעיף'), None)
-            col_maslul = next((j for j, v in enumerate(vals) if 'מסלול תשלום' in v), None)
-            col_total  = next((j for j, v in enumerate(vals) if 'סה"כ הוצאה' in v), None)
-            col_zikuy  = next((j for j, v in enumerate(vals) if 'זיכוי/חיוב בחודש' in v), None)
+            col_semel  = next((j for j, v in enumerate(row_vals) if 'סמל הסעיף' in v), None)
+            col_name   = next((j for j, v in enumerate(row_vals) if v == 'שם סעיף'), None)
+            col_maslul = next((j for j, v in enumerate(row_vals) if 'מסלול תשלום' in v), None)
+            col_total  = next((j for j, v in enumerate(row_vals) if 'סה"כ הוצאה' in v), None)
+            col_zikuy  = next((j for j, v in enumerate(row_vals) if 'זיכוי/חיוב בחודש' in v), None)
             break
 
     if header_row_idx is None:
@@ -197,78 +198,104 @@ def parse_welfare(content: bytes, month: int = None, index_map: Dict[str, Dict] 
     if col_semel is None:
         raise WelfareParserError("עמודת 'סמל הסעיף' לא נמצאה")
 
-    def _find_summary(keywords):
-        for row in reversed(rows_raw[header_row_idx:]):
-            row_text = ' '.join(_s(v) for v in row)
+    KEYWORDS_MISHRAD = ['תשלומי ממשלה']
+    KEYWORDS_CHOZ    = ['חיוב/זיכוי רשות', 'זיכוי רשות']
+
+    def _find_summary_value(keywords):
+        for i in range(len(df) - 1, header_row_idx, -1):
+            row = df.iloc[i]
+            row_text = ' '.join(str(v) for v in row.tolist())
             if any(k in row_text for k in keywords):
-                for val in row:
-                    if val is None:
-                        continue
+                for val in row.tolist():
+                    if pd.isna(val): continue
                     s = str(val).replace(',', '').strip()
-                    if re.fullmatch(r'-?\d+(\.\d+)?', s):
+                    import re as _re
+                    if _re.fullmatch(r'-?\d+(\.\d+)?', s):
                         return abs(float(s))
         return None
 
-    summary_mishrad = _find_summary(['תשלומי ממשלה'])
-    summary_choz    = _find_summary(['חיוב/זיכוי רשות', 'זיכוי רשות'])
+    summary_mishrad = _find_summary_value(KEYWORDS_MISHRAD)
+    summary_choz    = _find_summary_value(KEYWORDS_CHOZ)
 
     semel_data: Dict[str, dict] = {}
-    EXCLUDE = ['המחאות', 'שטרם נפדו', 'מסר']
 
-    for row in rows_raw[header_row_idx + 1:]:
-        raw_semel = _s(_cell(row, col_semel))
+    for i in range(header_row_idx + 1, len(df)):
+        row = df.iloc[i]
+        raw_semel = str(row.iloc[col_semel]) if col_semel < len(row) else ''
         if not raw_semel or raw_semel == 'nan':
             continue
+
         semel  = _extract_semel(raw_semel)
-        maslul = _s(_cell(row, col_maslul))
-        name   = _s(_cell(row, col_name))
-        total  = _f(_cell(row, col_total))
-        zikuy  = _f(_cell(row, col_zikuy))
+        maslul = str(row.iloc[col_maslul]).strip() if col_maslul and col_maslul < len(row) else ''
+        name   = str(row.iloc[col_name]).strip() if col_name and col_name < len(row) else ''
+        total  = float(row.iloc[col_total]) if col_total and col_total < len(row) and str(row.iloc[col_total]) != 'nan' else 0
+        zikuy  = float(row.iloc[col_zikuy]) if col_zikuy and col_zikuy < len(row) and str(row.iloc[col_zikuy]) != 'nan' else 0
 
         if semel not in semel_data:
-            semel_data[semel] = {'name': name or semel, 'has_ממשלה': False, 'debit_total': 0, 'zikuy': 0}
+            semel_data[semel] = {
+                'name':        name or semel,
+                'has_ממשלה':  False,
+                'debit_total': 0,
+                'zikuy':       0,
+            }
 
-        if maslul and 'רשות' not in maslul and 'ילדי חוץ' not in maslul and not any(k in maslul for k in EXCLUDE):
+        EXCLUDE_MASLUL = ['המחאות', 'שטרם נפדו', 'מסר']
+        if (maslul and maslul.strip() != '' and
+                'רשות' not in maslul and
+                'ילדי חוץ' not in maslul and
+                not any(k in maslul for k in EXCLUDE_MASLUL)):
             semel_data[semel]['has_ממשלה'] = True
             semel_data[semel]['debit_total'] += total
 
-        if not maslul and zikuy != 0:
+        if (not maslul or maslul.strip() == '') and zikuy != 0:
             semel_data[semel]['zikuy'] += zikuy
 
         if 'ילדי חוץ' in maslul and zikuy != 0:
             semel_data[semel]['zikuy'] += zikuy
 
+    import re as _re
+    for i in range(len(df) - 1, max(header_row_idx, len(df) - 20), -1):
+        row = df.iloc[i]
+        vals = [str(v).strip() for v in row.tolist()]
+        row_text = ' '.join(v for v in vals if v and v != 'nan')
+        if 'תשלומי ממשלה' in row_text and "סה''כ" in row_text:
+            try: summary_mishrad = abs(float(vals[10]))
+            except: pass
+        if 'חיוב/זיכוי רשות' in row_text and "סה''כ" in row_text:
+            try: summary_choz = abs(float(vals[10]))
+            except: pass
+
     rows = []
     for semel, data in semel_data.items():
         idx = welfare_index.get(semel, {})
         rows.append({
-            "semel":          semel,
-            "name":           data['name'],
-            "debit_account":  idx.get('debit', ''),
-            "credit_account": idx.get('credit', ''),
-            "has_ממשלה":     data['has_ממשלה'],
-            "debit_total":    _to_decimal(data['debit_total']),
-            "zikuy_hodesh":   _to_decimal(data['zikuy']),
-            "in_index":       bool(idx),
+            "semel":         semel,
+            "name":          data['name'],
+            "debit_account": idx.get('debit', ''),
+            "credit_account":idx.get('credit', ''),
+            "has_ממשלה":    data['has_ממשלה'],
+            "debit_total":   _to_decimal(data['debit_total']),
+            "zikuy_hodesh":  _to_decimal(data['zikuy']),
+            "in_index":      bool(idx),
         })
 
-    total_debit  = sum(r['debit_total']       for r in rows if r['debit_account'] and r['has_ממשלה'])
-    total_credit = sum(abs(r['zikuy_hodesh']) for r in rows if r['credit_account'] and r['zikuy_hodesh'] != 0)
+    total_debit  = sum(r['debit_total']         for r in rows if r['debit_account'] and r['has_ממשלה'])
+    total_credit = sum(abs(r['zikuy_hodesh'])    for r in rows if r['credit_account'] and r['zikuy_hodesh'] != 0)
 
     return {
-        "municipality":    municipality,
-        "period":          period_label,
-        "month":           period_month,
-        "year":            period_year,
-        "rows":            rows,
-        "total_rows":      len([r for r in rows if r['debit_total'] != 0 or r['zikuy_hodesh'] != 0]),
-        "missing_index":   [r for r in rows if not r['in_index'] and (r['debit_total'] > 0 or r['zikuy_hodesh'] != 0)],
-        "row_errors":      [],
-        "total_debit":     float(total_debit),
-        "total_credit":    float(total_credit),
+        "municipality":  municipality,
+        "period":        period_label,
+        "month":         period_month,
+        "year":          period_year,
+        "rows":          rows,
+        "total_rows":    len([r for r in rows if r['debit_total'] != 0 or r['zikuy_hodesh'] != 0]),
+        "missing_index": [r for r in rows if not r['in_index'] and (r['debit_total'] > 0 or r['zikuy_hodesh'] != 0)],
+        "row_errors":    [],
+        "total_debit":   float(total_debit),
+        "total_credit":  float(total_credit),
         "summary_mishrad": float(summary_mishrad) if summary_mishrad else float(total_debit),
         "summary_choz":    float(summary_choz)    if summary_choz    else None,
-        "balance_ok":      True,
+        "balance_ok":    True,
     }
 
 
@@ -287,31 +314,59 @@ def apply_welfare_splits(parsed: dict) -> tuple:
             missing.append({**row, "error": f"סעיף {row['semel']} לא נמצא ב-INDEX"})
             continue
 
+        # mishrad: חיובי→חובה, שלילי→זכות
         if debit_total != Decimal("0"):
             if debit_total > Decimal("0") and row["debit_account"]:
-                matched.append({"semel": row["semel"], "name": row["name"], "account": row["debit_account"],
-                                 "amount": float(debit_total), "side": "debit",
-                                 "description": f"רווחה {row['semel']} {row['name']}"})
+                matched.append({
+                    "semel":       row["semel"],
+                    "name":        row["name"],
+                    "account":     row["debit_account"],
+                    "amount":      float(debit_total),
+                    "side":        "debit",
+                    "description": f"רווחה {row['semel']} {row['name']}",
+                })
             elif debit_total < Decimal("0") and row["credit_account"]:
-                matched.append({"semel": row["semel"], "name": row["name"], "account": row["credit_account"],
-                                 "amount": float(abs(debit_total)), "side": "credit",
-                                 "description": f"רווחה {row['semel']} {row['name']}"})
+                matched.append({
+                    "semel":       row["semel"],
+                    "name":        row["name"],
+                    "account":     row["credit_account"],
+                    "amount":      float(abs(debit_total)),
+                    "side":        "credit",
+                    "description": f"רווחה {row['semel']} {row['name']}",
+                })
 
+        # zikuy: חיובי→זכות, שלילי→חובה
         if zikuy != Decimal("0"):
             if zikuy > Decimal("0") and row["credit_account"]:
-                matched.append({"semel": row["semel"], "name": row["name"], "account": row["credit_account"],
-                                 "amount": float(zikuy), "side": "credit",
-                                 "description": f"רווחה {row['semel']} {row['name']}"})
+                matched.append({
+                    "semel":       row["semel"],
+                    "name":        row["name"],
+                    "account":     row["credit_account"],
+                    "amount":      float(zikuy),
+                    "side":        "credit",
+                    "description": f"רווחה {row['semel']} {row['name']}",
+                })
             elif zikuy < Decimal("0") and row["debit_account"]:
-                matched.append({"semel": row["semel"], "name": row["name"], "account": row["debit_account"],
-                                 "amount": float(abs(zikuy)), "side": "debit",
-                                 "description": f"רווחה {row['semel']} {row['name']}"})
+                matched.append({
+                    "semel":       row["semel"],
+                    "name":        row["name"],
+                    "account":     row["debit_account"],
+                    "amount":      float(abs(zikuy)),
+                    "side":        "debit",
+                    "description": f"רווחה {row['semel']} {row['name']}",
+                })
 
+    # שורת חו"ז — מהדוח בלבד
     summary_choz = parsed.get("summary_choz")
     if summary_choz and Decimal(str(summary_choz)) > Decimal("0"):
-        matched.append({"semel": "חוז", "name": 'חו"ז משרד הרווחה', "account": "700000000",
-                         "amount": float(Decimal(str(summary_choz))), "side": "credit",
-                         "description": 'חו"ז משרד הרווחה'})
+        matched.append({
+            "semel":       "חוז",
+            "name":        'חו"ז משרד הרווחה',
+            "account":     "700000000",
+            "amount":      float(Decimal(str(summary_choz))),
+            "side":        "credit",
+            "description": 'חו"ז משרד הרווחה',
+        })
 
     summary_mishrad = parsed.get("summary_mishrad")
     if summary_mishrad and summary_choz:
