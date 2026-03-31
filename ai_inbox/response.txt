@@ -1,0 +1,3 @@
+TARGET: frontend/app/page.tsx
+GITONLY: true
+COMMIT: feat: welfare index screen - add/edit/delete semels
