@@ -1,7 +1,7 @@
 # parsers/welfare.py – פרסר קובץ רווחה גולמי (תמר)
 # כלל זהב: אם הועבר index_map מה-DB — משתמשים בו בלבד. אין fallback לסטטי.
 # איזון: gap = summary_mishrad - total_credit (source of truth: parser בלבד)
-# שורת השלמה לחשבון 1340000000 רק אם gap > 0
+# חו"ז: חשבון נשלף מה-DB לפי key 'חוז', semel ריק
 
 import io
 from decimal import Decimal, ROUND_HALF_UP, InvalidOperation
@@ -13,7 +13,6 @@ class WelfareParserError(Exception):
     pass
 
 
-# WELFARE_INDEX — reference בלבד. לא בשימוש אם הועבר index_map מה-DB.
 WELFARE_INDEX = {
     "120211": {"debit": "1849999783", "credit": "1342212930"},
     "120214": {"credit": "1342212930"},
@@ -101,19 +100,8 @@ WELFARE_INDEX = {
     "1175370": {"debit": "1848401840", "credit": "1348401930"},
 }
 
-# חשבון הכנסות כללי מממשלה — לשורת השלמה בלבד כאשר יש פער
-WELFARE_INCOME_ACCOUNT = "1340000000"
-
 
 def _extract_semel(value) -> Optional[str]:
-    """
-    מחלץ סמל סעיף מתא בקובץ.
-    פורמט בקובץ: [6 ספרות קידומת רשות][N ספרות סעיף]
-    דוגמאות:
-      230090242410 -> 242410   (6 ספרות סעיף)
-      2300901038410 -> 1038410  (7 ספרות סעיף)
-      2300901175320 -> 1175320  (7 ספרות סעיף)
-    """
     if value is None:
         return None
     s = str(value).strip()
@@ -122,11 +110,8 @@ def _extract_semel(value) -> Optional[str]:
     s = "".join(ch for ch in s if ch.isdigit())
     if not s:
         return None
-    # קידומת רשות = תמיד 6 ספרות (23009X)
-    # סעיף = 6 או 7 ספרות
-    # סה"כ אורך: 12 או 13 ספרות
     if len(s) >= 12:
-        s = s[6:]  # הסר 6 ספרות קידומת רשות
+        s = s[6:]
     return s
 
 
@@ -245,7 +230,7 @@ def parse_welfare(content: bytes, month: int = None, index_map: Dict[str, Dict] 
     summary_choz    = _find_summary_value(KEYWORDS_CHOZ)
 
     semel_data: Dict[str, dict] = {}
-    EXCLUDE_MASLUL = ['המחאות', 'שטרם נפדו', 'מסר']
+    EXCLUDE_MASLUL = ['המחאות', 'שטרם נפדו', 'מסר', 'ילדי חוץ', 'מת"ס']
 
     for i in range(header_row_idx + 1, len(df)):
         row = df.iloc[i]
@@ -313,7 +298,6 @@ def parse_welfare(content: bytes, month: int = None, index_map: Dict[str, Dict] 
     total_credit = sum(abs(r['zikuy_hodesh']) for r in rows if r['credit_account'] and r['zikuy_hodesh'] != 0)
     missing_index = [r for r in rows if not r['in_index'] and (r['debit_total'] > 0 or r['zikuy_hodesh'] != 0)]
 
-    # חישוב gap — source of truth יחיד. split לא מחשב מחדש.
     reconciliation: Dict[str, Any] = {}
     if summary_mishrad:
         sm  = Decimal(str(summary_mishrad))
@@ -354,7 +338,7 @@ def parse_welfare(content: bytes, month: int = None, index_map: Dict[str, Dict] 
         "summary_choz":    float(summary_choz)    if summary_choz    else None,
         "reconciliation":  reconciliation,
         "balance_ok":      reconciliation.get("status") == "balanced" if reconciliation else True,
-        "_welfare_index":  welfare_index,  # מעביר ל-apply_welfare_splits לשליפת חשבון חו"ז
+        "_welfare_index":  welfare_index,
     }
 
 
@@ -413,8 +397,7 @@ def apply_welfare_splits(parsed: dict) -> tuple:
                     "description": f"רווחה {row['semel']} {row['name']}",
                 })
 
-    # חו"ז — חשבון נשלף מה-index_map לפי key 'חוז'
-    # לא hardcoded — כל רשות מגדירה חשבון חו"ז משלה ב-DB
+    # חו"ז — חשבון נשלף מה-index_map לפי key 'חוז', semel ריק
     summary_choz = parsed.get("summary_choz")
     if summary_choz and Decimal(str(summary_choz)) > Decimal("0"):
         welfare_index = parsed.get("_welfare_index", {})
