@@ -145,11 +145,19 @@ def process_once():
 
         target = None
         try:
-            target, commit, gitonly = parse_gitonly(content)
+            target, commit, gitonly, forcecommit = parse_gitonly(content)
 
-            if gitonly:
+            if gitonly or forcecommit:
+                validate_path(target)
+                print(f"\n→ GITONLY TARGET: {target}")
+                print(f"→ COMMIT: {commit}")
                 timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
-                git_commit_push_all(f"{commit} | {timestamp}")
+                # add the specific file first, then force empty commit if needed
+                subprocess.run(["git", "add", target], cwd=REPO_PATH)
+                r2 = subprocess.run(["git", "commit", "--allow-empty", "-m", f"{commit} | {timestamp}"], cwd=REPO_PATH, capture_output=True, text=True)
+                r3 = subprocess.run(["git", "push"], cwd=REPO_PATH, capture_output=True, text=True)
+                print(f"git commit: {r2.stdout.strip()}")
+                print(f"git push:   {r3.returncode}")
                 os.remove(full_path)
                 print(f"✓ GITONLY הושלם — {file_name} נמחק\n")
                 return True
