@@ -1,3 +1,0 @@
-TARGET: frontend/app/page.tsx
-GITONLY: true
-COMMIT: feat: welfare preview shows missing index semels with block message
