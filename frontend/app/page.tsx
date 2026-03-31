@@ -563,7 +563,15 @@ export default function App() {
   const [elecResult, setElecResult] = useState<any>(null);
   const [elecVendorAccount, setElecVendorAccount] = useState('7000000000');
   const [elecLoading, setElecLoading] = useState(false);
-  const [welfareView, setWelfareView] = useState<'home'|'intake'>('home');
+  const [welfareView, setWelfareView] = useState<'home'|'intake'|'indexes'>('home');
+  const WELFARE_TEMPLATE_ID_IDX = '95b37d2d-c9ea-4ef1-9164-ab5ac642b0c7';
+  const [welfareIndexes, setWelfareIndexes] = useState<any[]>([]);
+  const [welfareIndexSearch, setWelfareIndexSearch] = useState('');
+  const [welfareIndexLoading, setWelfareIndexLoading] = useState(false);
+  const [welfareNewRow, setWelfareNewRow] = useState({ key_value: '', debit: '', credit: '', name: '' });
+  const [welfareAddError, setWelfareAddError] = useState('');
+  const [welfareEditId, setWelfareEditId] = useState<string|null>(null);
+  const [welfareEditVals, setWelfareEditVals] = useState({ debit: '', credit: '', name: '' });
   const [welfareResult, setWelfareResult] = useState<any>(null);
   const [welfareLoading, setWelfareLoading] = useState(false);
   const [welfareRefreshKey, setWelfareRefreshKey] = useState(0);
@@ -726,6 +734,7 @@ export default function App() {
     welfare: [
       { label: 'דשבורד', view: 'home', icon: '📊' },
       { label: 'קליטת דוח', view: 'intake', icon: '📂' },
+      { label: 'עדכון אינדקס', view: 'indexes', icon: '📋' },
     ],
     celcom: [
       { label: 'דשבורד', view: 'home', icon: '📊' },
@@ -845,7 +854,7 @@ export default function App() {
                       .then((d:any) => setElecIndexes(Array.isArray(d) ? d : [])).catch(() => {});
                   }
                 }
-                if (activeTab === 'welfare') { setWelfareView(item.view as any); if (item.view === 'intake') setWelfareResult(null); setError(''); }
+                if (activeTab === 'welfare') { setWelfareView(item.view as any); if (item.view === 'intake') { setWelfareResult(null); setError(''); } if (item.view === 'indexes' && muni) { setWelfareIndexSearch(''); apiFetch(`/indexes?municipality_id=${muni.id}&template_id=95b37d2d-c9ea-4ef1-9164-ab5ac642b0c7&limit=500`).then(d => setWelfareIndexes(Array.isArray(d)?d:[])); } }
                 if (activeTab === 'bezeq') {
                   setBezeqView(item.view as any);
                   if (item.view === 'indexes') { setIndexSearch(''); loadIndexes(); }
@@ -1111,6 +1120,61 @@ export default function App() {
               )}
             </div>
           )}
+
+          {activeTab === 'welfare' && welfareView === 'indexes' && (
+            <div>
+              <div className="flex justify-between items-center mb-4">
+                <div><h1 className="text-base font-semibold">אינדקס רווחה</h1><p className="text-xs text-gray-500">{muni?.name} · {welfareIndexes.filter(i=>!welfareIndexSearch||i.key_value?.includes(welfareIndexSearch)||i.account_code?.includes(welfareIndexSearch)||(i.connection_name||'').includes(welfareIndexSearch)).length} רשומות</p></div>
+                <input value={welfareIndexSearch} onChange={e=>setWelfareIndexSearch(e.target.value)} placeholder="חיפוש סמל / חשבון..." className="border border-gray-200 rounded-lg px-3 py-2 text-sm w-56" />
+              </div>
+              <div className="bg-white rounded-xl border border-gray-200 overflow-hidden mb-4">
+                <table className="w-full text-sm">
+                  <thead><tr className="bg-gray-50 border-b border-gray-100">
+                    {['סמל סעיף','שם','חשבון חובה','חשבון זכות',''].map(h=><th key={h} className="text-right p-3 text-xs text-gray-500 font-medium">{h}</th>)}
+                  </tr></thead>
+                  <tbody>
+                    {welfareIndexes.filter(i=>!welfareIndexSearch||i.key_value?.includes(welfareIndexSearch)||(i.connection_name||'').includes(welfareIndexSearch)||i.account_code?.includes(welfareIndexSearch)).map((idx:any)=>(
+                      <tr key={idx.id} className="border-b border-gray-50 hover:bg-gray-50">
+                        <td className="p-3 font-mono text-xs">{idx.key_value}</td>
+                        <td className="p-3 text-xs text-gray-500">{idx.connection_name||'—'}</td>
+                        {welfareEditId===idx.id ? (
+                          <><td className="p-2"><input value={welfareEditVals.debit} onChange={e=>setWelfareEditVals(p=>({...p,debit:e.target.value}))} className="border rounded px-2 py-1 text-xs font-mono w-32" placeholder="חשבון חובה"/></td>
+                          <td className="p-2"><input value={welfareEditVals.credit} onChange={e=>setWelfareEditVals(p=>({...p,credit:e.target.value}))} className="border rounded px-2 py-1 text-xs font-mono w-32" placeholder="חשבון זכות"/></td>
+                          <td className="p-2 flex gap-1"><button onClick={async()=>{try{if(welfareEditVals.debit)await apiFetch(`/indexes/${idx.id}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({account_code:welfareEditVals.debit,description:'debit',connection_name:welfareEditVals.name})});if(welfareEditVals.credit){const cr=welfareIndexes.find(x=>x.key_value===idx.key_value&&x.description==='credit');if(cr)await apiFetch(`/indexes/${cr.id}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({account_code:welfareEditVals.credit})});}setWelfareEditId(null);apiFetch(`/indexes?municipality_id=${muni.id}&template_id=95b37d2d-c9ea-4ef1-9164-ab5ac642b0c7&limit=500`).then(d=>setWelfareIndexes(Array.isArray(d)?d:[]));} catch(e:any){setWelfareAddError(e.message);}}} className="text-xs bg-blue-600 text-white rounded px-2 py-1">שמור</button><button onClick={()=>setWelfareEditId(null)} className="text-xs border rounded px-2 py-1">ביטול</button></td></>
+                        ) : (
+                          <><td className="p-3 font-mono text-xs">{idx.description==='debit'?idx.account_code:welfareIndexes.find(x=>x.key_value===idx.key_value&&x.description==='debit')?.account_code||'—'}</td>
+                          <td className="p-3 font-mono text-xs">{idx.description==='credit'?idx.account_code:welfareIndexes.find(x=>x.key_value===idx.key_value&&x.description==='credit')?.account_code||'—'}</td>
+                          <td className="p-3 flex gap-2"><button onClick={()=>{const db=welfareIndexes.find(x=>x.key_value===idx.key_value&&x.description==='debit');const cr=welfareIndexes.find(x=>x.key_value===idx.key_value&&x.description==='credit');setWelfareEditId(idx.id);setWelfareEditVals({debit:db?.account_code||'',credit:cr?.account_code||'',name:idx.connection_name||''});}} className="text-xs text-blue-600 hover:underline">ערוך</button><button onClick={async()=>{if(!confirm('מחק?'))return;const same=welfareIndexes.filter(x=>x.key_value===idx.key_value);await Promise.all(same.map(x=>apiFetch(`/indexes/${x.id}`,{method:'DELETE'})));setWelfareIndexes(p=>p.filter(x=>x.key_value!==idx.key_value));}} className="text-xs text-red-400 hover:text-red-600">מחק</button></td></>
+                        )}
+                      </tr>
+                    )).filter((_:any,i:number,arr:any[])=>arr.findIndex((x:any)=>x.key&&x.key===_.key)===i)}
+                  </tbody>
+                </table>
+              </div>
+              <div className="bg-white rounded-xl border border-gray-200 p-4">
+                <h2 className="text-sm font-semibold mb-3">+ הוספת סעיף חדש</h2>
+                {welfareAddError && <div className="text-red-500 text-xs mb-2">{welfareAddError}</div>}
+                <div className="grid grid-cols-2 gap-3 mb-3">
+                  <div><label className="text-xs text-gray-500 block mb-1">סמל סעיף</label><input value={welfareNewRow.key_value} onChange={e=>setWelfareNewRow(p=>({...p,key_value:e.target.value}))} className="border border-gray-200 rounded-lg px-3 py-2 text-sm w-full font-mono" placeholder="למשל: 039734"/></div>
+                  <div><label className="text-xs text-gray-500 block mb-1">שם סעיף</label><input value={welfareNewRow.name} onChange={e=>setWelfareNewRow(p=>({...p,name:e.target.value}))} className="border border-gray-200 rounded-lg px-3 py-2 text-sm w-full" placeholder="שם לתצוגה"/></div>
+                  <div><label className="text-xs text-gray-500 block mb-1">חשבון חובה</label><input value={welfareNewRow.debit} onChange={e=>setWelfareNewRow(p=>({...p,debit:e.target.value}))} className="border border-gray-200 rounded-lg px-3 py-2 text-sm w-full font-mono" placeholder="184XXXXXXX"/></div>
+                  <div><label className="text-xs text-gray-500 block mb-1">חשבון זכות</label><input value={welfareNewRow.credit} onChange={e=>setWelfareNewRow(p=>({...p,credit:e.target.value}))} className="border border-gray-200 rounded-lg px-3 py-2 text-sm w-full font-mono" placeholder="134XXXXXXX"/></div>
+                </div>
+                <button onClick={async()=>{
+                  setWelfareAddError('');
+                  if(!welfareNewRow.key_value||!welfareNewRow.credit){setWelfareAddError('סמל וחשבון זכות הם שדות חובה');return;}
+                  try{
+                    if(welfareNewRow.debit) await apiFetch('/indexes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({municipality_id:muni.id,template_id:'95b37d2d-c9ea-4ef1-9164-ab5ac642b0c7',key_value:welfareNewRow.key_value.trim(),account_code:welfareNewRow.debit.trim(),description:'debit',connection_name:welfareNewRow.name.trim()})});
+                    await apiFetch('/indexes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({municipality_id:muni.id,template_id:'95b37d2d-c9ea-4ef1-9164-ab5ac642b0c7',key_value:welfareNewRow.key_value.trim(),account_code:welfareNewRow.credit.trim(),description:'credit',connection_name:welfareNewRow.name.trim()})});
+                    setWelfareNewRow({key_value:'',debit:'',credit:'',name:''});
+                    const fresh=await apiFetch(`/indexes?municipality_id=${muni.id}&template_id=95b37d2d-c9ea-4ef1-9164-ab5ac642b0c7&limit=500`);
+                    setWelfareIndexes(Array.isArray(fresh)?fresh:[]);
+                  }catch(e:any){setWelfareAddError(e.message||'שגיאה');}
+                }} className="bg-green-600 text-white rounded-lg px-5 py-2 text-sm hover:bg-green-700">הוסף סעיף</button>
+              </div>
+            </div>
+          )}
+
 
           {activeTab !== 'bezeq' && activeTab !== 'electricity' && activeTab !== 'welfare' && activeTab !== 'celcom' && (
             <div className="flex flex-col items-center justify-center h-64 text-center">
