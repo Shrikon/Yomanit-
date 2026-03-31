@@ -423,7 +423,7 @@ def apply_welfare_splits(parsed: dict) -> tuple:
             print(f"[WELFARE] WARNING: no 'חוז' entry in index_map — skipping choz line")
         else:
             matched.append({
-                "semel":       "חוז",
+                "semel":       "",
                 "name":        'חו"ז משרד הרווחה',
                 "account":     choz_account,
                 "amount":      float(Decimal(str(summary_choz))),
