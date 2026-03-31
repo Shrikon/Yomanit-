@@ -132,7 +132,7 @@ def parse_gitonly(text):
             forcecommit = line.replace("FORCECOMMIT:", "").strip().lower() == "true"
         elif line.startswith("GITONLY:"):
             gitonly = line.replace("GITONLY:", "").strip().lower() == "true"
-    return target, commit, gitonly
+    return target, commit, gitonly, forcecommit
 
 
 def process_once():
