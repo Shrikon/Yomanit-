@@ -366,6 +366,10 @@ def apply_welfare_splits(parsed: dict) -> tuple:
         if debit_total == Decimal("0") and zikuy == Decimal("0"):
             continue
 
+        # דילוג על סעיפים ללא תשלומי ממשלה — לא שייכים לפקודה זו
+        if not row["has_ממשלה"]:
+            continue
+
         if not row["in_index"]:
             missing.append({**row, "error": f"סעיף {row['semel']} לא נמצא ב-INDEX"})
             continue
