@@ -1101,7 +1101,22 @@ export default function App() {
                     <button onClick={() => { setWelfareResult(null); setError(''); }} className="border border-gray-200 rounded-lg px-4 py-2 text-sm">קובץ חדש</button>
                     {welfareResult.missing_index?.length > 0 && muni && (
                       <button
-                        onClick={() => window.open(`${API}/upload/welfare/missing-report?municipality_id=${muni.id}`, '_blank')}
+                        onClick={async () => {
+                          if (!muni || !welfareResult) return;
+                          try {
+                            const res = await fetch(`${API}/upload/welfare/missing-report`, {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ municipality_id: muni.id, period: `${welfareResult.month}/${welfareResult.year || 2026}`, missing: welfareResult.missing_index })
+                            });
+                            if (!res.ok) throw new Error(await res.text());
+                            const blob = await res.blob();
+                            const url = URL.createObjectURL(blob);
+                            const a = document.createElement('a'); a.href = url;
+                            a.download = `missing_welfare_${welfareResult.month}_${welfareResult.year || 2026}.xlsx`;
+                            a.click(); URL.revokeObjectURL(url);
+                          } catch(e: any) { alert(e.message); }
+                        }}
                         className="border border-amber-300 text-amber-700 rounded-lg px-4 py-2 text-sm hover:bg-amber-50">
                         ⬇ דוח סעיפים חסרים ({welfareResult.missing_index.length})
                       </button>
