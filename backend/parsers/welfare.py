@@ -415,35 +415,31 @@ def apply_welfare_splits(parsed: dict) -> tuple:
                 "description": f"רווחה {row['semel']} {row['name']}",
             })
 
-    # --- מעבר 3: שורת חו"ז אחת מ-summary_choz ---
+    # --- מעבר 3: שורת חו"ז — סכום שיורי מאזן ---
+    # choz = total_debit - total_credit_without_choz
+    # לא משתמשים ב-summary_choz מהדוח לאיזון — הפקודה תמיד תסגר לאפס
     welfare_index = parsed.get("_welfare_index", {})
     choz_account  = welfare_index.get("חוז", {}).get("credit", "")
-    summary_choz  = parsed.get("summary_choz")
 
     if not choz_account:
         print(f"[WELFARE] WARNING: no 'חוז' entry in index_map — skipping choz line")
-    elif summary_choz is not None:
-        sc = Decimal(str(summary_choz))
-        if sc > Decimal("0"):
+    else:
+        total_d = sum(Decimal(str(r["amount"])) for r in matched if r["side"] == "debit")
+        total_c = sum(Decimal(str(r["amount"])) for r in matched if r["side"] == "credit")
+        choz_amount = total_d - total_c  # חיובי = חוב של המשרד (זכות) | שלילי = חוב של הרשות (חובה)
+
+        if abs(choz_amount) >= Decimal("1"):
+            side = "credit" if choz_amount > 0 else "debit"
             matched.append({
                 "semel":       "",
                 "name":        'חו"ז משרד הרווחה',
                 "account":     choz_account,
-                "amount":      float(sc),
-                "side":        "credit",
+                "amount":      float(abs(choz_amount)),
+                "side":        side,
                 "description": 'חו"ז משרד הרווחה',
             })
-            print(f"[BALANCE] choz line: account={choz_account} amount={float(sc):,.0f} side=credit")
-        elif sc < Decimal("0"):
-            # חו"ז שלילי (הרשות חייבת למשרד) → חובה
-            matched.append({
-                "semel":       "",
-                "name":        'חו"ז משרד הרווחה',
-                "account":     choz_account,
-                "amount":      float(abs(sc)),
-                "side":        "debit",
-                "description": 'חו"ז משרד הרווחה',
-            })
-            print(f"[BALANCE] choz line: account={choz_account} amount={float(abs(sc)):,.0f} side=debit")
+            print(f"[BALANCE] choz line: account={choz_account} amount={float(abs(choz_amount)):,.0f} side={side}")
+        else:
+            print(f"[BALANCE] הפקודה מאוזנת ללא שורת חו"ז (פער={float(choz_amount):,.0f})")
 
     return matched, missing
