@@ -181,22 +181,51 @@ def parse_welfare(content: bytes, month: int = None, index_map: Dict[str, Dict] 
                 break
 
     # ── תקופה ─────────────────────────────────────────────────────────
+    # תקופה — סדר עדיפויות:
+    # 1. שם חודש עברי מ'לחודש:'
+    # 2. 'דיווח רשות: M/YYYY' (גובר על השם העברי)
+    # 3. 'שנת תקציב:' לשנה בלבד
+    # fallback: תשלום לחודש X/YYYY לא בשימוש
+    MONTHS_HE = {
+        'ינואר': 1, 'פברואר': 2, 'מרץ': 3, 'אפריל': 4,
+        'מאי': 5, 'יוני': 6, 'יולי': 7, 'אוגוסט': 8,
+        'ספטמבר': 9, 'אוקטובר': 10, 'נובמבר': 11, 'דצמבר': 12
+    }
     period_label = ""
     period_month = month
     period_year  = None
+
     for i in range(min(8, len(df))):
-        for j in range(len(df.columns)):
-            v = str(df.iloc[i, j])
-            m = re.search(r'תשלום לחודש\s*(\d+)/(\d{4})', v)
-            if m:
-                period_month = int(m.group(1))
-                period_year  = int(m.group(2))
-                period_label = f"{period_month}/{period_year}"
-                break
+        row_vals = [str(df.iloc[i, j]).strip() for j in range(len(df.columns))]
+        row_text = ' '.join(row_vals)
+
+        # 1. שם חודש עברי מ'לחודש:'
+        if 'לחודש:' in row_text and period_month is None:
+            for v in row_vals:
+                if v in MONTHS_HE:
+                    period_month = MONTHS_HE[v]
+                    break
+
+        # 2. 'דיווח רשות: M/YYYY' — גובר תמיד
+        if 'דיווח רשות' in row_text:
+            m2 = re.search(r'דיווח רשות[:\s]+(\d+)/(\d{4})', row_text)
+            if m2:
+                period_month = int(m2.group(1))
+                period_year  = int(m2.group(2))
+
+        # 3. שנה מ'שנת תקציב:'
+        if 'שנת תקציב:' in row_text and period_year is None:
+            for v in row_vals:
+                m3 = re.search(r'(\d{4})', v)
+                if m3:
+                    period_year = int(m3.group(1))
+                    break
+
     if period_month is None:
         period_month = 1
     if period_year is None:
         period_year = datetime.datetime.now().year
+    period_label = f"{period_month}/{period_year}"
 
     # ── headers ───────────────────────────────────────────────────────
     header_row_idx = None
