@@ -1069,43 +1069,42 @@ export default function App() {
                       <span>חובה: ₪{welfareResult.total_debit?.toLocaleString()}</span>
                     </div>
                   </div>
-                  {!welfareResult.can_approve && welfareResult.missing_index?.length > 0 && (
-                    <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-4">
-                      <div className="font-semibold text-red-700 text-sm mb-2">
-                        ⚠️ סעיפים חסרים באינדקס — יש לעדכן לפני יצירת הפקודה
+                  {welfareResult.missing_index?.length > 0 && (
+                    <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-4">
+                      <div className="font-semibold text-amber-700 text-sm mb-2">
+                        ⚠️ {welfareResult.missing_index.length} סעיפים חסרים באינדקס — יירשמו ללא קוד חשבון
                       </div>
-                      <div className="text-xs text-red-600 mb-3">עבור למסך &quot;עדכון אינדקס&quot; והוסף את הסעיפים הבאים:</div>
+                      <div className="text-xs text-amber-600 mb-3">הפקודה תיקלט. ניתן להשלים את הקודים בעדכון אינדקס ולהפיק מחדש:</div>
                       <table className="w-full text-xs">
                         <thead>
-                          <tr className="text-red-500 border-b border-red-200">
+                          <tr className="text-amber-600 border-b border-amber-200">
                             <th className="text-right pb-1">סמל סעיף</th>
                             <th className="text-right pb-1">שם סעיף</th>
-                            <th className="text-right pb-1">סכום</th>
+                            <th className="text-right pb-1">סכום T</th>
+                            <th className="text-right pb-1">סכום K</th>
                           </tr>
                         </thead>
                         <tbody>
                           {welfareResult.missing_index.map((r: any) => (
-                            <tr key={r.semel} className="border-b border-red-100">
-                              <td className="py-1 font-mono text-red-700">{r.semel}</td>
-                              <td className="py-1 text-red-600">{r.name}</td>
-                              <td className="py-1 text-red-600">₪{(parseFloat(r.debit_total || r.zikuy_hodesh || 0)).toLocaleString()}</td>
+                            <tr key={r.semel} className="border-b border-amber-100">
+                              <td className="py-1 font-mono text-amber-700">{r.semel}</td>
+                              <td className="py-1 text-amber-600">{r.name}</td>
+                              <td className="py-1 text-amber-600">₪{(parseFloat(r.govt_amount || 0)).toLocaleString()}</td>
+                              <td className="py-1 text-amber-600">₪{(parseFloat(r.source_amount || 0)).toLocaleString()}</td>
                             </tr>
                           ))}
                         </tbody>
                       </table>
-                      <div className="mt-3 text-xs text-red-500 font-medium">
-                        סה&quot;כ {welfareResult.missing_index.length} סעיפים חסרים — הפקודה חסומה עד להשלמתם
-                      </div>
                     </div>
                   )}
                   <div className="flex gap-3">
                     <button onClick={() => { setWelfareResult(null); setError(''); }} className="border border-gray-200 rounded-lg px-4 py-2 text-sm">קובץ חדש</button>
-                    <button disabled={!welfareResult.can_approve || welfareLoading}
+                    <button disabled={welfareLoading}
                       onClick={async () => {
                         if (!muni || !welfareResult) return;
                         setWelfareLoading(true); setError('');
                         try {
-                          const lines = welfareResult.rows.filter((r:any) => r.status === 'ok' && r.amount > 0).map((r:any) => ({ semel: r.semel, account: r.account, amount: r.amount, side: r.side, description: r.description }));
+                          const lines = welfareResult.rows.filter((r:any) => r.amount > 0).map((r:any) => ({ semel: r.semel, account: r.account, amount: r.amount, side: r.side, description: r.description }));
                           const res = await apiFetch('/upload/welfare/approve', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ municipality_id: muni.id, period: `${welfareResult.year || new Date().getFullYear()}-${String(welfareResult.month).padStart(2,'0')}`, month: welfareResult.month, year: welfareResult.year || new Date().getFullYear(), source_file: welfareResult.filename, lines }) });
                           alert(`פקודה נוצרה! ${res.reference_num}`);
                           setWelfareResult(null); setWelfareRefreshKey(k => k + 1); setWelfareView('home');
@@ -1113,7 +1112,7 @@ export default function App() {
                         finally { setWelfareLoading(false); }
                       }}
                       className="bg-green-600 text-white rounded-lg px-6 py-2 text-sm disabled:opacity-40">
-                      {welfareLoading ? 'שומר...' : welfareResult.can_approve ? 'צור פקודת יומן ✓' : `חסרים ${welfareResult.missing_index?.length || ''} סעיפים באינדקס`}
+                      {welfareLoading ? 'שומר...' : 'צור פקודת יומן ✓'}
                     </button>
                   </div>
                 </div>
