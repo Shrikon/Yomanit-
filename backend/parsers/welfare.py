@@ -264,11 +264,12 @@ def parse_welfare(content: bytes, month: int = None, index_map: Dict[str, Dict] 
         if any(k in maslul for k in EXCLUDE_MASLUL):
             continue
 
-        # govt: col_total של שורות תשלומי ממשלה בלבד
+        # govt: עמודה T (סה"כ הוצאה) — שורות תשלומי ממשלה בלבד → 184xxx
         if 'תשלומי ממשלה' in maslul:
             semel_data[semel]['govt'] += ctotal
 
-        # source: col10 שורת סיכום (ללא מסלול) + ילדי חוץ + הפרש
+        # source: עמודה K (זיכוי/חיוב בחודש) — שורת סיכום + ילדי חוץ + הפרשים → 134xxx
+        # זו ההשתתפות המשרדית בפועל. choz = govt - source = summary_choz
         if not maslul or maslul.strip() in ('', ' '):
             semel_data[semel]['source'] += c10
         elif 'ילדי חוץ' in maslul or 'הפרש' in maslul:
