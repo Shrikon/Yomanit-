@@ -308,12 +308,7 @@ def parse_welfare(content: bytes, month: int = None, index_map: Dict[str, Dict] 
     if summary_mishrad:
         sm  = Decimal(str(summary_mishrad))
         gap = sm - total_credit
-        if gap < Decimal("0"):
-            raise WelfareParserError(
-                f"שגיאת שלמות נתונים: סכום הזיכויים ({float(total_credit):.2f}) "
-                f"עולה על summary_mishrad ({float(sm):.2f}). פער: {float(gap):.2f}"
-            )
-        status = "balanced" if gap < Decimal("1") else "missing_index"
+        status = "balanced" if abs(gap) < Decimal("1") else "missing_index"
         reconciliation = {
             "summary_mishrad":      sm,
             "total_indexed_credit": total_credit,
@@ -321,7 +316,7 @@ def parse_welfare(content: bytes, month: int = None, index_map: Dict[str, Dict] 
             "status":               status,
         }
         print(f"[RECONCILE] summary={sm} indexed_credit={total_credit} gap={gap} status={status}")
-        if gap >= Decimal("1"):
+        if abs(gap) >= Decimal("1"):
             print(f"[RECONCILE] GAP={gap} — {len(missing_index)} missing index entries")
 
     if missing_index:
