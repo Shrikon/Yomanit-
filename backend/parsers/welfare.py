@@ -264,12 +264,13 @@ def parse_welfare(content: bytes, month: int = None, index_map: Dict[str, Dict] 
         if any(k in maslul for k in EXCLUDE_MASLUL):
             continue
 
-        # govt: עמודה T (סה"כ הוצאה) — שורות תשלומי ממשלה בלבד → 184xxx
+        # govt: עמודה T — תשלומי ממשלה בלבד → 184xxx חיוב
         if 'תשלומי ממשלה' in maslul:
             semel_data[semel]['govt'] += ctotal
 
-        # source: עמודה K (זיכוי/חיוב בחודש) — שורת סיכום + ילדי חוץ + הפרשים → 134xxx
-        # זו ההשתתפות המשרדית בפועל. choz = govt - source = summary_choz
+        # source: עמודה K — שורת סיכום (ללא מסלול) + ילדי חוץ + הפרשים → 134xxx זכות
+        # K = הכנסה כוללת (ממשלה + רשות + התאמות)
+        # choz = T_ממשלה - K = summary_choz (מאומת על 5 קבצים)
         if not maslul or maslul.strip() in ('', ' '):
             semel_data[semel]['source'] += c10
         elif 'ילדי חוץ' in maslul or 'הפרש' in maslul:
@@ -376,7 +377,7 @@ def apply_welfare_splits(parsed: dict):
                 "description": f"רווחה {row['semel']} {row['name']}",
             })
 
-    # --- מעבר 2: שורות 134xxx (source = col10 סיכום) ---
+    # --- מעבר 2: שורות 134xxx (source = K: שורות סיכום + ילדי חוץ + הפרשים) ---
     for row in parsed["rows"]:
         source = row["source_amount"]
         if source == Decimal('0'):
@@ -399,6 +400,10 @@ def apply_welfare_splits(parsed: dict):
             })
 
     # --- מעבר 3: שורת חו"ז שיורית אחת ---
+    # choz = total_debit - total_credit
+    # חיובי → זכות (משרד חייב לרשות)
+    # שלילי → חובה (רשות חייבת למשרד)
+    # מאומת: abs(choz) = summary_choz על 5 קבצים
     if choz_account:
         total_d = sum(Decimal(str(r["amount"])) for r in matched if r["side"] == "debit")
         total_c = sum(Decimal(str(r["amount"])) for r in matched if r["side"] == "credit")
