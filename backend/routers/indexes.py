@@ -99,27 +99,23 @@ async def create_index(payload: IndexCreate):
                     "desc": desc, "conn": payload.connection_name})
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+    from index_cache import invalidate
+    invalidate(payload.municipality_id, payload.template_id)
     return {"id": idx_id, "created": True}
 
 
 # PUT /indexes/split – שמירת פיצול מלא לחוזה
 @router.put("/split", status_code=200)
 async def upsert_split(payload: SplitUpdate):
-    """
-    מחליף את כל השורות של key_value בפיצול החדש.
-    ולידציה מלאה לפני כתיבה.
-    """
     validate_splits(payload.splits, payload.key_value)
 
     async with database.transaction():
-        # מחק את כל השורות הקיימות לאותו חוזה
         await database.execute(
             """UPDATE indexes SET active = FALSE
                WHERE municipality_id = :muni AND template_id = :tmpl AND key_value = :key""",
             values={"muni": payload.municipality_id, "tmpl": payload.template_id,
                     "key": payload.key_value})
 
-        # הכנס שורות חדשות
         for split in payload.splits:
             await database.execute(
                 """
@@ -213,15 +209,23 @@ async def update_index(index_id: str, payload: dict):
         values["desc"] = str(payload["description"])
     if not fields:
         return {"updated": False}
+    row = await database.fetch_one("SELECT municipality_id, template_id FROM indexes WHERE id = :id", values={"id": index_id})
     await database.execute(
         f"UPDATE indexes SET {', '.join(fields)}, updated_at = NOW() WHERE id = :id",
         values=values)
+    if row:
+        from index_cache import invalidate
+        invalidate(str(row["municipality_id"]), str(row["template_id"]))
     return {"updated": True}
 
 
 # DELETE /indexes/{id}
 @router.delete("/{index_id}")
 async def delete_index(index_id: str):
+    row = await database.fetch_one("SELECT municipality_id, template_id FROM indexes WHERE id = :id", values={"id": index_id})
     await database.execute(
         "UPDATE indexes SET active = FALSE WHERE id = :id", values={"id": index_id})
+    if row:
+        from index_cache import invalidate
+        invalidate(str(row["municipality_id"]), str(row["template_id"]))
     return {"deleted": True}
