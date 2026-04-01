@@ -1210,7 +1210,7 @@ export default function App() {
                         <td className="p-3 font-mono text-xs">{e.reference_num}</td>
                         <td className="p-3 text-xs">{e.period}</td>
                         <td className="p-3 font-medium text-xs">₪{(e.total_amount||0).toLocaleString()}</td>
-                        <td className="p-3"><span className={`px-2 py-0.5 rounded-full text-xs ${e.status==='draft'?'bg-blue-100 text-blue-700':'bg-green-100 text-green-700'}`}>{e.status==='draft'?'טיוטה':'אושר'}</span></td>
+                        <td className="p-3"><span className={`px-2 py-0.5 rounded-full text-xs ${e.status==='draft'?'bg-blue-100 text-blue-700':'bg-green-100 text-green-700'}`}>{e.status==='draft'?'טיוטה':'מאושר'}</span></td>
                         <td className="p-3 flex gap-3">
                           <button onClick={()=>window.open(`${API}/journal-entries/${e.id}/export`,'_blank')} className="text-xs text-blue-600 hover:underline">Excel</button>
                           {e.status !== 'approved' && <button onClick={()=>deleteJournalEntry(e.id, e.reference_num)} className="text-xs text-red-500 hover:underline">מחק</button>}
