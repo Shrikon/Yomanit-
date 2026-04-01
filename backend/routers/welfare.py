@@ -308,3 +308,99 @@ async def delete_welfare_entry(entry_id: str):
         )
 
     return {"deleted": True, "reference_num": entry["reference_num"]}
+
+
+# ─────────────────────────────────────────────
+# POST /upload/welfare/missing-report
+# מחזיר Excel עם סעיפים חסרים — מקבל JSON
+# ─────────────────────────────────────────────
+from pydantic import BaseModel as _MBM
+from typing import List as _MList
+
+class MissingReportIn(_MBM):
+    municipality_id: str
+    period:          str = ""
+    missing:         _MList[dict] = []
+
+@router.post("/missing-report")
+async def welfare_missing_report(payload: MissingReportIn):
+    from fastapi.responses import Response
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from openpyxl.utils import get_column_letter
+    import io as _io
+
+    missing = payload.missing
+    if not missing:
+        raise HTTPException(status_code=204, detail="אין סעיפים חסרים")
+
+    municipality = payload.municipality_id
+    period       = payload.period
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "סעיפים חסרים"
+    ws.sheet_view.rightToLeft = True
+
+    HEADER_BG = "1F4E79"
+    WARN_BG   = "FFF2CC"
+    ROW_ALT   = "DEEAF1"
+    thin      = Side(style="thin", color="AAAAAA")
+    border    = Border(left=thin, right=thin, top=thin, bottom=thin)
+
+    ws.merge_cells("A1:F1")
+    ws["A1"] = f"סעיפים חסרים באינדקס — {municipality} | תקופה: {period}"
+    ws["A1"].font      = Font(bold=True, size=13, color="1F4E79")
+    ws["A1"].fill      = PatternFill("solid", fgColor=WARN_BG)
+    ws["A1"].alignment = Alignment(horizontal="center", vertical="center")
+    ws.row_dimensions[1].height = 28
+
+    ws.merge_cells("A2:F2")
+    ws["A2"] = "יש להעביר רשימה זו למחלקת הרווחה לצורך קביעת חשבון חיוב וחשבון זכות לכל סעיף"
+    ws["A2"].font      = Font(italic=True, size=10, color="595959")
+    ws["A2"].alignment = Alignment(horizontal="center")
+
+    headers = ["סמל סעיף", "שם סעיף", "חיוב ממשלה (T)", "הכנסה (K)", "חו\"ז", "הערות"]
+    widths  = [14, 38, 18, 18, 14, 22]
+    ws.row_dimensions[3].height = 20
+    for col, (h, w) in enumerate(zip(headers, widths), 1):
+        cell = ws.cell(row=3, column=col, value=h)
+        cell.font      = Font(bold=True, color="FFFFFF", size=10)
+        cell.fill      = PatternFill("solid", fgColor=HEADER_BG)
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+        cell.border    = border
+        ws.column_dimensions[get_column_letter(col)].width = w
+
+    for i, r in enumerate(missing):
+        row  = 4 + i
+        fill = PatternFill("solid", fgColor=ROW_ALT if i % 2 == 0 else "FFFFFF")
+        govt   = float(r.get("govt_amount",   0) or 0)
+        source = float(r.get("source_amount", 0) or 0)
+        choz   = float(r.get("choz_amount",   0) or 0)
+        vals   = [r.get("semel",""), r.get("name",""),
+                  govt if govt != 0 else "",
+                  source if source != 0 else "",
+                  choz if choz != 0 else "", ""]
+        for col, val in enumerate(vals, 1):
+            cell = ws.cell(row=row, column=col, value=val)
+            cell.fill   = fill
+            cell.border = border
+            cell.font   = Font(size=10)
+            cell.alignment = Alignment(horizontal="right")
+            if col in (3, 4, 5) and val != "":
+                cell.number_format = "#,##0"
+
+    last = 4 + len(missing)
+    ws.cell(row=last, column=1, value=f'סה"כ סעיפים חסרים:').font = Font(bold=True, size=10)
+    ws.cell(row=last, column=2, value=len(missing)).font = Font(bold=True, size=10)
+
+    buf = _io.BytesIO()
+    wb.save(buf)
+    xlsx_bytes = buf.getvalue()
+
+    filename = f"welfare_missing_{period.replace('/', '-')}.xlsx"
+    return Response(
+        content=xlsx_bytes,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
