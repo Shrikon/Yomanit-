@@ -1097,8 +1097,15 @@ export default function App() {
                       </table>
                     </div>
                   )}
-                  <div className="flex gap-3">
+                  <div className="flex gap-3 flex-wrap">
                     <button onClick={() => { setWelfareResult(null); setError(''); }} className="border border-gray-200 rounded-lg px-4 py-2 text-sm">קובץ חדש</button>
+                    {welfareResult.missing_index?.length > 0 && muni && (
+                      <button
+                        onClick={() => window.open(`${API}/upload/welfare/missing-report?municipality_id=${muni.id}`, '_blank')}
+                        className="border border-amber-300 text-amber-700 rounded-lg px-4 py-2 text-sm hover:bg-amber-50">
+                        ⬇ דוח סעיפים חסרים ({welfareResult.missing_index.length})
+                      </button>
+                    )}
                     <button disabled={welfareLoading}
                       onClick={async () => {
                         if (!muni || !welfareResult) return;
