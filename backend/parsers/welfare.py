@@ -414,40 +414,24 @@ def apply_welfare_splits(parsed: dict) -> tuple:
                     "description": f"רווחה {row['semel']} {row['name']}",
                 })
 
-    # חו"ז — מחושב דינמית מההפרש בין זכות לחובה שנכנסו בפועל לפקודה
-    # לא מבוסס על summary_choz קבוע — מבטיח איזון מדויק
+    # חו"ז — תמיד נלקח מ-summary_choz בדוח, תמיד בצד זכות
+    # מייצג: יתרת התחשבנות מול המשרד (חוב של המשרד לרשות)
+    # לא נגזר מחישוב — שקיפות מלאה מול הדוח
     welfare_index = parsed.get("_welfare_index", {})
-    choz_account = welfare_index.get("חוז", {}).get("credit", "")
+    choz_account  = welfare_index.get("חוז", {}).get("credit", "")
+    summary_choz  = parsed.get("summary_choz")
 
-    if choz_account:
-        total_matched_debit  = sum(Decimal(str(r["amount"])) for r in matched if r["side"] == "debit")
-        total_matched_credit = sum(Decimal(str(r["amount"])) for r in matched if r["side"] == "credit")
-        choz_amount = total_matched_credit - total_matched_debit
-
-        print(f"[BALANCE] matched_debit={total_matched_debit} matched_credit={total_matched_credit} choz={choz_amount}")
-
-        if choz_amount > Decimal("0"):
-            # זכות גדולה מחובה → חו"ז בצד חובה לאיזון
-            matched.append({
-                "semel":       "",
-                "name":        'חו"ז משרד הרווחה',
-                "account":     choz_account,
-                "amount":      float(choz_amount),
-                "side":        "debit",
-                "description": 'חו"ז משרד הרווחה',
-            })
-        elif choz_amount < Decimal("0"):
-            # חובה גדולה מזכות → חו"ז בצד זכות לאיזון
-            matched.append({
-                "semel":       "",
-                "name":        'חו"ז משרד הרווחה',
-                "account":     choz_account,
-                "amount":      float(abs(choz_amount)),
-                "side":        "credit",
-                "description": 'חו"ז משרד הרווחה',
-            })
-        # אם choz_amount == 0 → הפקודה מאוזנת ללא חו"ז
-    else:
+    if not choz_account:
         print(f"[WELFARE] WARNING: no 'חוז' entry in index_map — skipping choz line")
+    elif summary_choz and Decimal(str(summary_choz)) > Decimal("0"):
+        matched.append({
+            "semel":       "",
+            "name":        'חו"ז משרד הרווחה',
+            "account":     choz_account,
+            "amount":      float(Decimal(str(summary_choz))),
+            "side":        "credit",
+            "description": 'חו"ז משרד הרווחה',
+        })
+        print(f"[BALANCE] choz line: account={choz_account} amount={summary_choz} side=credit")
 
     return matched, missing
