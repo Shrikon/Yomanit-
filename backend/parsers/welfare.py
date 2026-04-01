@@ -344,82 +344,106 @@ def parse_welfare(content: bytes, month: int = None, index_map: Dict[str, Dict] 
 
 
 def apply_welfare_splits(parsed: dict) -> tuple:
+    """
+    3 מעברים עצמאיים — ללא תלות הדדית בין הצדדים:
+    מעבר 1: שורות 184xxx — חיוב לפי debit_total (rasut+mishrad), שלילי מתהפך לזכות
+    מעבר 2: שורות 134xxx — זכות לפי zikuy_hodesh (mishrad בלבד), שלילי מתהפך לחובה
+    מעבר 3: שורת חו"ז אחת לפי summary_choz
+    אין סינון rasut=0, אין סינון mishrad=0, אין תלות בין מעבר 1 ל-2.
+    """
     matched = []
     missing = []
 
+    # --- מעבר 1: שורות 184xxx (חיוב = rasut+mishrad) ---
     for row in parsed["rows"]:
-        debit_total = row["debit_total"]
-        zikuy       = row["zikuy_hodesh"]
-
-        if debit_total == Decimal("0") and zikuy == Decimal("0"):
-            continue
-
-        # דילוג על סעיפים ללא תשלומי ממשלה — לא שייכים לפקודה זו
         if not row["has_ממשלה"]:
             continue
-
-        if not row["in_index"]:
-            missing.append({**row, "error": f"סעיף {row['semel']} לא נמצא ב-INDEX"})
+        debit_total = row["debit_total"]
+        if debit_total == Decimal("0"):
             continue
+        if not row["in_index"]:
+            if row not in missing:
+                missing.append({**row, "error": f"סעיף {row['semel']} לא נמצא ב-INDEX"})
+            continue
+        if debit_total > Decimal("0") and row["debit_account"]:
+            matched.append({
+                "semel":       row["semel"],
+                "name":        row["name"],
+                "account":     row["debit_account"],
+                "amount":      float(debit_total),
+                "side":        "debit",
+                "description": f"רווחה {row['semel']} {row['name']}",
+            })
+        elif debit_total < Decimal("0") and row["credit_account"]:
+            # שלילי → מתהפך לזכות
+            matched.append({
+                "semel":       row["semel"],
+                "name":        row["name"],
+                "account":     row["credit_account"],
+                "amount":      float(abs(debit_total)),
+                "side":        "credit",
+                "description": f"רווחה {row['semel']} {row['name']}",
+            })
 
-        if debit_total != Decimal("0"):
-            if debit_total > Decimal("0") and row["debit_account"]:
-                matched.append({
-                    "semel":       row["semel"],
-                    "name":        row["name"],
-                    "account":     row["debit_account"],
-                    "amount":      float(debit_total),
-                    "side":        "debit",
-                    "description": f"רווחה {row['semel']} {row['name']}",
-                })
-            elif debit_total < Decimal("0") and row["credit_account"]:
-                matched.append({
-                    "semel":       row["semel"],
-                    "name":        row["name"],
-                    "account":     row["credit_account"],
-                    "amount":      float(abs(debit_total)),
-                    "side":        "credit",
-                    "description": f"רווחה {row['semel']} {row['name']}",
-                })
+    # --- מעבר 2: שורות 134xxx (זכות = mishrad בלבד) ---
+    for row in parsed["rows"]:
+        if not row["has_ממשלה"]:
+            continue
+        zikuy = row["zikuy_hodesh"]
+        if zikuy == Decimal("0"):
+            continue
+        if not row["in_index"]:
+            # כבר נוסף ל-missing במעבר 1 (אם היה שם), לא כופלים
+            continue
+        if zikuy > Decimal("0") and row["credit_account"]:
+            matched.append({
+                "semel":       row["semel"],
+                "name":        row["name"],
+                "account":     row["credit_account"],
+                "amount":      float(zikuy),
+                "side":        "credit",
+                "description": f"רווחה {row['semel']} {row['name']}",
+            })
+        elif zikuy < Decimal("0") and row["debit_account"]:
+            # שלילי → מתהפך לחובה
+            matched.append({
+                "semel":       row["semel"],
+                "name":        row["name"],
+                "account":     row["debit_account"],
+                "amount":      float(abs(zikuy)),
+                "side":        "debit",
+                "description": f"רווחה {row['semel']} {row['name']}",
+            })
 
-        if zikuy != Decimal("0"):
-            if zikuy > Decimal("0") and row["credit_account"]:
-                matched.append({
-                    "semel":       row["semel"],
-                    "name":        row["name"],
-                    "account":     row["credit_account"],
-                    "amount":      float(zikuy),
-                    "side":        "credit",
-                    "description": f"רווחה {row['semel']} {row['name']}",
-                })
-            elif zikuy < Decimal("0") and row["debit_account"]:
-                matched.append({
-                    "semel":       row["semel"],
-                    "name":        row["name"],
-                    "account":     row["debit_account"],
-                    "amount":      float(abs(zikuy)),
-                    "side":        "debit",
-                    "description": f"רווחה {row['semel']} {row['name']}",
-                })
-
-    # חו"ז — תמיד נלקח מ-summary_choz בדוח, תמיד בצד זכות
-    # מייצג: יתרת התחשבנות מול המשרד (חוב של המשרד לרשות)
-    # לא נגזר מחישוב — שקיפות מלאה מול הדוח
+    # --- מעבר 3: שורת חו"ז אחת מ-summary_choz ---
     welfare_index = parsed.get("_welfare_index", {})
     choz_account  = welfare_index.get("חוז", {}).get("credit", "")
     summary_choz  = parsed.get("summary_choz")
 
     if not choz_account:
         print(f"[WELFARE] WARNING: no 'חוז' entry in index_map — skipping choz line")
-    elif summary_choz and Decimal(str(summary_choz)) > Decimal("0"):
-        matched.append({
-            "semel":       "",
-            "name":        'חו"ז משרד הרווחה',
-            "account":     choz_account,
-            "amount":      float(Decimal(str(summary_choz))),
-            "side":        "credit",
-            "description": 'חו"ז משרד הרווחה',
-        })
-        print(f"[BALANCE] choz line: account={choz_account} amount={summary_choz} side=credit")
+    elif summary_choz is not None:
+        sc = Decimal(str(summary_choz))
+        if sc > Decimal("0"):
+            matched.append({
+                "semel":       "",
+                "name":        'חו"ז משרד הרווחה',
+                "account":     choz_account,
+                "amount":      float(sc),
+                "side":        "credit",
+                "description": 'חו"ז משרד הרווחה',
+            })
+            print(f"[BALANCE] choz line: account={choz_account} amount={float(sc):,.0f} side=credit")
+        elif sc < Decimal("0"):
+            # חו"ז שלילי (הרשות חייבת למשרד) → חובה
+            matched.append({
+                "semel":       "",
+                "name":        'חו"ז משרד הרווחה',
+                "account":     choz_account,
+                "amount":      float(abs(sc)),
+                "side":        "debit",
+                "description": 'חו"ז משרד הרווחה',
+            })
+            print(f"[BALANCE] choz line: account={choz_account} amount={float(abs(sc)):,.0f} side=debit")
 
     return matched, missing
