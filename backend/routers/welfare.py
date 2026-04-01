@@ -359,7 +359,7 @@ async def welfare_missing_report(payload: MissingReportIn):
     # שורה 1: כותרת ראשית
     NUM_COLS = 7
     ws.merge_cells(f"A1:{get_column_letter(NUM_COLS)}1")
-    ws["A1"] = f"סעיפים חסרים באינדקס — {muni_name} לחודש פקודה ______ | תקופה: {period}"
+    ws["A1"] = f"סעיפים חסרים באינדקס — {muni_name} | תקופה: {period}"
     ws["A1"].font      = Font(bold=True, size=13, color="1F4E79")
     ws["A1"].fill      = PatternFill("solid", fgColor=WARN_BG)
     ws["A1"].alignment = Alignment(horizontal="center", vertical="center")
