@@ -262,24 +262,16 @@ def parse_welfare(content: bytes, month: int = None, index_map: Dict[str, Dict] 
                 'zikuy':       0,
             }
 
-        if (maslul and maslul.strip() != '' and
-                'רשות' not in maslul and
-                'ילדי חוץ' not in maslul and
-                not any(k in maslul for k in EXCLUDE_MASLUL)):
+        if 'תשלומי ממשלה' in maslul and not any(k in maslul for k in EXCLUDE_MASLUL):
             semel_data[semel]['has_ממשלה'] = True
-            if is_new_structure and col_rasut is not None and col_mishrad_col is not None:
-                # מבנה חדש: gov_amount = חלק רשות + חלק משרד
+            if col_rasut is not None and col_mishrad_col is not None:
+                # חיוב = חלק רשות + חלק משרד (כל ההוצאה)
                 v_rasut   = float(row.iloc[col_rasut])       if col_rasut       < len(row) and str(row.iloc[col_rasut])       != 'nan' else 0
                 v_mishrad = float(row.iloc[col_mishrad_col]) if col_mishrad_col < len(row) and str(row.iloc[col_mishrad_col]) != 'nan' else 0
-                semel_data[semel]['debit_total'] += v_rasut + v_mishrad
+                semel_data[semel]['debit_total']  += v_rasut + v_mishrad
+                semel_data[semel]['mishrad_total'] += v_mishrad
             else:
                 semel_data[semel]['debit_total'] += total
-
-        if (not maslul or maslul.strip() == '') and zikuy != 0:
-            semel_data[semel]['zikuy'] += zikuy
-
-        if 'ילדי חוץ' in maslul and zikuy != 0:
-            semel_data[semel]['zikuy'] += zikuy
 
     import re as _re
     for i in range(len(df) - 1, max(header_row_idx, len(df) - 20), -1):
