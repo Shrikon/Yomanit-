@@ -256,10 +256,11 @@ def parse_welfare(content: bytes, month: int = None, index_map: Dict[str, Dict] 
 
         if semel not in semel_data:
             semel_data[semel] = {
-                'name':        name or semel,
-                'has_ממשלה':  False,
-                'debit_total': 0,
-                'zikuy':       0,
+                'name':          name or semel,
+                'has_ממשלה':    False,
+                'debit_total':   0,  # rasut + mishrad (כל ההוצאה)
+                'mishrad_total': 0,  # mishrad בלבד (חלק המשרד)
+                'zikuy':         0,
             }
 
         if 'תשלומי ממשלה' in maslul and not any(k in maslul for k in EXCLUDE_MASLUL):
