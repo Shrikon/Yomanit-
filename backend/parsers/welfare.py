@@ -295,8 +295,8 @@ def parse_welfare(content: bytes, month: int = None, index_map: Dict[str, Dict] 
             "debit_account": idx.get('debit', ''),
             "credit_account":idx.get('credit', ''),
             "has_ממשלה":    data['has_ממשלה'],
-            "debit_total":   _to_decimal(data['debit_total']),
-            "zikuy_hodesh":  _to_decimal(data['zikuy']),
+            "debit_total":   _to_decimal(data['debit_total']),   # rasut+mishrad → 184xxx
+            "zikuy_hodesh":  _to_decimal(data['mishrad_total']), # mishrad בלבד → 134xxx
             "in_index":      bool(idx),
         })
 
