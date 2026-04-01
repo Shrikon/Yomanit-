@@ -411,7 +411,9 @@ async def welfare_missing_report(payload: MissingReportIn):
     wb.save(buf)
     xlsx_bytes = buf.getvalue()
 
-    filename = f"welfare_missing_{muni_name}_{period.replace('/', '-')}.xlsx"
+    import urllib.parse
+    filename_ascii = f"welfare_missing_{period.replace('/', '-')}.xlsx"
+    filename_utf8  = urllib.parse.quote(f"welfare_missing_{muni_name}_{period.replace('/', '-')}.xlsx")
     return Response(
         content=xlsx_bytes,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
