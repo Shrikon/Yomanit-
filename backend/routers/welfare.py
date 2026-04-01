@@ -244,10 +244,24 @@ async def approve_welfare(payload: WelfareApproveIn):
         # רווחה: אין שורת איזון — חו"ז כבר קיים בתוך payload.lines מהדוח
         # כלל זהב: approve אינו מאזן — הוא רק מאשר
 
+        # בדוק אם כל השורות יש להן חשבון — אם כן, קבע אוטומטית כ-approved
+        all_lines_have_account = all(
+            (line.account or '').strip() != ''
+            for line in payload.lines
+        )
+        final_status = 'approved' if all_lines_have_account else 'draft'
+        if final_status == 'approved':
+            await database.execute(
+                """UPDATE journal_entries
+                   SET status = 'approved', approved_at = NOW()
+                   WHERE id = :id""",
+                values={"id": entry_id}
+            )
+
     return {
         "id":            entry_id,
         "reference_num": ref_num,
-        "status":        "draft",
+        "status":        final_status,
         "total_debit":   float(total_debit + (diff if diff > 0 else 0)),
         "total_credit":  float(total_credit + (abs(diff) if diff < 0 else 0)),
         "ministry_diff": float(diff),
