@@ -412,7 +412,7 @@ def apply_welfare_splits(parsed: dict):
             })
             print(f"[BALANCE] choz={float(abs(choz)):,.0f} side={side}")
         else:
-            print(f"[BALANCE] מאוזן ללא שורת חו\"ז (פער={float(choz):,.2f})")
+            print(f"[BALANCE] מאוזן ללא שורת חוז (פער={float(choz):.2f})")
 
     total_d = sum(Decimal(str(r["amount"])) for r in matched if r["side"] == "debit")
     total_c = sum(Decimal(str(r["amount"])) for r in matched if r["side"] == "credit")
