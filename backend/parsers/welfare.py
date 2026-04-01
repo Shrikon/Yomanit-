@@ -207,7 +207,7 @@ def parse_welfare(content: bytes, month: int = None, index_map: Dict[str, Dict] 
             col_total       = next((j for j, v in enumerate(row_vals) if 'סה"כ הוצאה' in v), None)
             col_zikuy       = next((j for j, v in enumerate(row_vals) if 'זיכוי/חיוב בחודש' in v), None)
             col_rasut       = next((j for j, v in enumerate(row_vals) if 'חלק הרשות' in v), None)
-            col_mishrad_col = next((j for j, v in enumerate(row_vals) if 'חלק המשרד' in v), None)
+            col_mishrad_col = next((j for j, v in enumerate(row_vals) if 'חלק המשרד לפי הסיווג' in v), None)
             is_new_structure = (col_rasut is not None and col_mishrad_col is not None)
             print(f"[PARSER] structure={'new (rasut+mishrad)' if is_new_structure else 'old (col_total)'}")
             break
