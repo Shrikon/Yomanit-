@@ -1,7 +1,6 @@
 # parsers/welfare.py – פרסר קובץ רווחה גולמי (תמר)
-# כלל זהב: אם הועבר index_map מה-DB — משתמשים בו בלבד. אין fallback לסטטי.
-# איזון: gap = summary_mishrad - total_credit (source of truth: parser בלבד)
-# חו"ז: חשבון נשלף מה-DB לפי key 'חוז', semel ריק
+# זיהוי מבנה אוטומטי: new_structure (col_rasut+col_mishrad) או old_structure (col_total)
+# חו"ז: חשבון מה-DB לפי key 'חוז', semel ריק
 
 import io
 from decimal import Decimal, ROUND_HALF_UP, InvalidOperation
@@ -58,7 +57,7 @@ WELFARE_INDEX = {
     "723050": {"debit": "1845325840", "credit": "1345325930"},
     "723051": {"debit": "1845326840", "credit": "1345326930"},
     "723054": {"debit": "1845332840", "credit": "1345332930"},
-    "723056": {"debit": "1845334840", "credit": "1345334930"},
+    "723056": {"debit": "1845334840", "credit": "1845334930"},
     "723210": {"debit": "1845404840", "credit": "1345404930"},
     "723212": {"debit": "1845408840", "credit": "1345408930"},
     "723214": {"debit": "1845410840", "credit": "1345410930"},
@@ -99,6 +98,8 @@ WELFARE_INDEX = {
     "1175332": {"debit": "1848303840", "credit": "1348303930"},
     "1175370": {"debit": "1848401840", "credit": "1348401930"},
 }
+
+WELFARE_INCOME_ACCOUNT = "1340000000"
 
 
 def _extract_semel(value) -> Optional[str]:
@@ -191,18 +192,24 @@ def parse_welfare(content: bytes, month: int = None, index_map: Dict[str, Dict] 
 
     header_row_idx = None
     col_semel = col_name = col_maslul = col_total = col_zikuy = None
+    col_rasut = col_mishrad_col = None
+    is_new_structure = False
     summary_mishrad = None
     summary_choz    = None
 
     for i in range(min(15, len(df))):
         row_vals = [str(v).strip() for v in df.iloc[i].tolist()]
         if 'חיוב בחודש זה' in row_vals:
-            header_row_idx = i
-            col_semel  = next((j for j, v in enumerate(row_vals) if 'סמל הסעיף' in v), None)
-            col_name   = next((j for j, v in enumerate(row_vals) if v == 'שם סעיף'), None)
-            col_maslul = next((j for j, v in enumerate(row_vals) if 'מסלול תשלום' in v), None)
-            col_total  = next((j for j, v in enumerate(row_vals) if 'סה"כ הוצאה' in v), None)
-            col_zikuy  = next((j for j, v in enumerate(row_vals) if 'זיכוי/חיוב בחודש' in v), None)
+            header_row_idx  = i
+            col_semel       = next((j for j, v in enumerate(row_vals) if 'סמל הסעיף' in v), None)
+            col_name        = next((j for j, v in enumerate(row_vals) if v == 'שם סעיף'), None)
+            col_maslul      = next((j for j, v in enumerate(row_vals) if 'מסלול תשלום' in v), None)
+            col_total       = next((j for j, v in enumerate(row_vals) if 'סה"כ הוצאה' in v), None)
+            col_zikuy       = next((j for j, v in enumerate(row_vals) if 'זיכוי/חיוב בחודש' in v), None)
+            col_rasut       = next((j for j, v in enumerate(row_vals) if 'חלק הרשות' in v), None)
+            col_mishrad_col = next((j for j, v in enumerate(row_vals) if 'חלק המשרד' in v), None)
+            is_new_structure = (col_rasut is not None and col_mishrad_col is not None)
+            print(f"[PARSER] structure={'new (rasut+mishrad)' if is_new_structure else 'old (col_total)'}")
             break
 
     if header_row_idx is None:
@@ -230,7 +237,7 @@ def parse_welfare(content: bytes, month: int = None, index_map: Dict[str, Dict] 
     summary_choz    = _find_summary_value(KEYWORDS_CHOZ)
 
     semel_data: Dict[str, dict] = {}
-    EXCLUDE_MASLUL = ['המחאות', 'שטרם נפדו', 'מסר', 'ילדי חוץ', 'מת"ס']
+    EXCLUDE_MASLUL = ['המחאות', 'שטרם נפדו', 'מסר']
 
     for i in range(header_row_idx + 1, len(df)):
         row = df.iloc[i]
@@ -243,9 +250,9 @@ def parse_welfare(content: bytes, month: int = None, index_map: Dict[str, Dict] 
             continue
 
         maslul = str(row.iloc[col_maslul]).strip() if col_maslul and col_maslul < len(row) else ''
-        name   = str(row.iloc[col_name]).strip() if col_name and col_name < len(row) else ''
-        total  = float(row.iloc[col_total]) if col_total and col_total < len(row) and str(row.iloc[col_total]) != 'nan' else 0
-        zikuy  = float(row.iloc[col_zikuy]) if col_zikuy and col_zikuy < len(row) and str(row.iloc[col_zikuy]) != 'nan' else 0
+        name   = str(row.iloc[col_name]).strip()   if col_name   and col_name   < len(row) else ''
+        total  = float(row.iloc[col_total])  if col_total  and col_total  < len(row) and str(row.iloc[col_total])  != 'nan' else 0
+        zikuy  = float(row.iloc[col_zikuy])  if col_zikuy  and col_zikuy  < len(row) and str(row.iloc[col_zikuy])  != 'nan' else 0
 
         if semel not in semel_data:
             semel_data[semel] = {
@@ -260,7 +267,13 @@ def parse_welfare(content: bytes, month: int = None, index_map: Dict[str, Dict] 
                 'ילדי חוץ' not in maslul and
                 not any(k in maslul for k in EXCLUDE_MASLUL)):
             semel_data[semel]['has_ממשלה'] = True
-            semel_data[semel]['debit_total'] += total
+            if is_new_structure and col_rasut is not None and col_mishrad_col is not None:
+                # מבנה חדש: gov_amount = חלק רשות + חלק משרד
+                v_rasut   = float(row.iloc[col_rasut])       if col_rasut       < len(row) and str(row.iloc[col_rasut])       != 'nan' else 0
+                v_mishrad = float(row.iloc[col_mishrad_col]) if col_mishrad_col < len(row) and str(row.iloc[col_mishrad_col]) != 'nan' else 0
+                semel_data[semel]['debit_total'] += v_rasut + v_mishrad
+            else:
+                semel_data[semel]['debit_total'] += total
 
         if (not maslul or maslul.strip() == '') and zikuy != 0:
             semel_data[semel]['zikuy'] += zikuy
@@ -294,8 +307,8 @@ def parse_welfare(content: bytes, month: int = None, index_map: Dict[str, Dict] 
             "in_index":      bool(idx),
         })
 
-    total_debit  = sum(r['debit_total']       for r in rows if r['debit_account'] and r['has_ממשלה'])
-    total_credit = sum(abs(r['zikuy_hodesh']) for r in rows if r['credit_account'] and r['zikuy_hodesh'] != 0)
+    total_debit  = sum(r['debit_total'] for r in rows if r['debit_account'] and r['has_ממשלה'])
+    total_credit = sum(r['debit_total'] for r in rows if r['credit_account'] and r['has_ממשלה'] and r['debit_total'] > 0)
     missing_index = [r for r in rows if not r['in_index'] and (r['debit_total'] > 0 or r['zikuy_hodesh'] != 0)]
 
     reconciliation: Dict[str, Any] = {}
