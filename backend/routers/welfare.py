@@ -419,3 +419,37 @@ async def welfare_missing_report(payload: MissingReportIn):
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f'attachment; filename="{filename_ascii}"; filename*=UTF-8\'\'{filename_utf8}'},
     )
+
+
+# ─────────────────────────────────────────────
+# POST /upload/welfare/treasurer-report
+# מייצר PDF דוח תקצוב והתחשבנות לגזבר מקובץ Excel
+# ─────────────────────────────────────────────
+@router.post("/treasurer-report")
+async def welfare_treasurer_report(
+    file:  UploadFile = File(...),
+    month: int        = Form(None),
+):
+    from fastapi.responses import Response
+    import urllib.parse
+
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="קובץ ריק")
+
+    try:
+        from welfare_report_analyzer import generate_from_bytes
+        pdf_bytes = generate_from_bytes(content, month=month)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"שגיאה ביצירת הדוח: {str(e)}")
+
+    filename_ascii = "welfare_treasurer_report.pdf"
+    filename_utf8 = urllib.parse.quote("דוח_רווחה_לגזבר.pdf")
+
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename_ascii}"; filename*=UTF-8\'\'{filename_utf8}'},
+    )

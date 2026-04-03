@@ -487,27 +487,48 @@ function WelfareDashboard({ muni, onNewIntake, refreshKey }: { muni: any, onNewI
 
   return (
     <div>
-      <div className="flex justify-between items-center mb-5">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-5">
         <div>
           <h1 className="text-base font-semibold">רווחה – דשבורד</h1>
           <p className="text-xs text-gray-500">{muni?.name} · {welfareEntries.length} תקופות</p>
         </div>
-        <button onClick={onNewIntake} className="bg-green-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-green-700 font-medium">🤝 + קליטת דוח</button>
+        <div className="flex gap-2 w-full sm:w-auto">
+          <button onClick={onNewIntake} className="bg-green-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-green-700 font-medium flex-1 sm:flex-none">🤝 + קליטת דוח</button>
+          <label className="bg-white text-purple-700 border border-purple-300 px-4 py-2 rounded-lg text-sm hover:bg-purple-50 font-medium cursor-pointer flex-1 sm:flex-none text-center">
+            📊 דוח לגזבר
+            <input type="file" accept=".xlsx,.xls" className="hidden" onChange={async (ev) => {
+              const file = ev.target.files?.[0]; if (!file) return;
+              try {
+                const fd = new FormData(); fd.append('file', file);
+                const res = await fetch(`${API}/upload/welfare/treasurer-report`, { method: 'POST', body: fd });
+                if (!res.ok) { const d = await res.json(); throw new Error(d.detail || 'שגיאה'); }
+                const blob = await res.blob();
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a'); a.href = url;
+                a.download = `דוח_רווחה_לגזבר_${new Date().toISOString().slice(0,10)}.pdf`;
+                a.click(); URL.revokeObjectURL(url);
+              } catch(err: any) { alert(err.message || 'שגיאה ביצירת הדוח'); }
+              ev.target.value = '';
+            }} />
+          </label>
+        </div>
       </div>
       {loading ? <div className="p-12 text-center text-sm text-gray-400">טוען...</div> : (<>
       {welfareEntries.length > 0 && (
-        <div className="grid grid-cols-3 gap-3 mb-5">
-          <div className="bg-white rounded-xl border border-gray-200 p-4">
-            <div className="text-xs text-gray-400 mb-1">תקופה אחרונה</div>
-            <div className="text-lg font-bold text-gray-900">₪{Math.round(lastEntry?.total_amount || 0).toLocaleString()}</div>
-            <div className="text-xs text-gray-500 mt-0.5">{lastEntry?.period}</div>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-5">
+          <div className="bg-white rounded-xl border border-gray-200 p-4 flex sm:block justify-between items-center">
+            <div className="text-xs text-gray-400 mb-0 sm:mb-1">תקופה אחרונה</div>
+            <div>
+              <div className="text-lg font-bold text-gray-900">₪{Math.round(lastEntry?.total_amount || 0).toLocaleString()}</div>
+              <div className="text-xs text-gray-500 mt-0.5 text-left sm:text-right">{lastEntry?.period}</div>
+            </div>
           </div>
-          <div className="bg-white rounded-xl border border-gray-200 p-4">
-            <div className="text-xs text-gray-400 mb-1">סה"כ מצטבר</div>
+          <div className="bg-white rounded-xl border border-gray-200 p-4 flex sm:block justify-between items-center">
+            <div className="text-xs text-gray-400">סה"כ מצטבר</div>
             <div className="text-lg font-bold text-gray-900">₪{Math.round(totalAll).toLocaleString()}</div>
           </div>
-          <div className="bg-white rounded-xl border border-gray-200 p-4">
-            <div className="text-xs text-gray-400 mb-1">מספר פקודות</div>
+          <div className="bg-white rounded-xl border border-gray-200 p-4 flex sm:block justify-between items-center">
+            <div className="text-xs text-gray-400">מספר פקודות</div>
             <div className="text-lg font-bold text-gray-900">{welfareEntries.length}</div>
           </div>
         </div>
@@ -519,7 +540,9 @@ function WelfareDashboard({ muni, onNewIntake, refreshKey }: { muni: any, onNewI
         </div>
         {welfareEntries.length === 0
           ? <div className="p-8 text-center text-sm text-gray-400">אין פקודות עדיין</div>
-          : <table className="w-full text-sm">
+          : <>
+              {/* טבלה לדסקטופ */}
+              <table className="w-full text-sm hidden sm:table">
               <thead><tr className="border-b border-gray-100">
                 {['מספר','תקופה','סכום','סטטוס',''].map(h =>
                   <th key={h} className="text-right p-2.5 text-xs text-gray-400 font-medium">{h}</th>)}
@@ -543,7 +566,32 @@ function WelfareDashboard({ muni, onNewIntake, refreshKey }: { muni: any, onNewI
                   </tr>
                 ))}
               </tbody>
-            </table>}
+            </table>
+              {/* כרטיסים למובייל */}
+              <div className="sm:hidden divide-y divide-gray-100">
+                {welfareEntries.map((e: any) => (
+                  <div key={e.id} className="p-3">
+                    <div className="flex justify-between items-start mb-2">
+                      <div>
+                        <div className="font-mono text-xs text-gray-700">{e.reference_num}</div>
+                        <div className="text-xs text-gray-400 mt-0.5">{e.period}</div>
+                      </div>
+                      <div className="text-left">
+                        <div className="text-sm font-bold text-gray-900">₪{Math.round(e.total_amount||0).toLocaleString()}</div>
+                        <span className={`px-2 py-0.5 rounded-full text-xs ${e.status==='draft' ? 'bg-blue-100 text-blue-700' : 'bg-green-100 text-green-700'}`}>
+                          {e.status==='draft' ? 'טיוטה' : 'יוצא'}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="flex gap-3 mt-2">
+                      <button onClick={() => window.open(`${API}/journal-entries/${e.id}/welfare-report`, '_blank')} className="text-xs bg-green-50 text-green-700 border border-green-200 rounded-lg px-3 py-1.5 font-medium">דוח לגזבר</button>
+                      <button onClick={() => window.open(`${API}/journal-entries/${e.id}/export`, '_blank')} className="text-xs bg-blue-50 text-blue-700 border border-blue-200 rounded-lg px-3 py-1.5">Excel</button>
+                      {e.status !== 'locked' && <button onClick={() => deleteEntry(e.id, e.reference_num)} className="text-xs text-red-400 border border-red-200 rounded-lg px-3 py-1.5">מחק</button>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>}
       </div>
       </>)}
     </div>

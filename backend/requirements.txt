@@ -30,8 +30,10 @@ pydantic_core==2.41.5
 Pygments==2.19.2
 python-dateutil==2.9.0.post0
 python-dotenv==1.2.2
+python-bidi==0.6.7
 python-multipart==0.0.9
 PyYAML==6.0.3
+reportlab==4.4.10
 rich==14.3.3
 rich-toolkit==0.19.7
 shellingham==1.5.4
