@@ -21,16 +21,13 @@ from dataclasses import dataclass
 from typing import List, Dict, Optional
 
 import openpyxl
+from bidi.algorithm import get_display
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
-from reportlab.platypus import (
-    SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer,
-)
-from reportlab.lib.styles import ParagraphStyle
+from reportlab.pdfgen import canvas
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
-from reportlab.lib.enums import TA_RIGHT, TA_CENTER
 
 # ── Constants ─────────────────────────────────────────────────────────
 FONT_PATH = r"C:\Windows\Fonts\arial.ttf"
@@ -218,7 +215,7 @@ def parse_excel(path: str) -> ReportData:
     )
 
 
-# ── PDF Generation ────────────────────────────────────────────────────
+# ── PDF Generation (Canvas-based for reliable Hebrew rendering) ───────
 
 def _register_font():
     pdfmetrics.registerFont(TTFont(FONT_NAME, FONT_PATH))
@@ -230,71 +227,175 @@ def _fmt_num(val: float) -> str:
     return f"{val:,.2f}"
 
 
-def _build_styles():
-    title_style = ParagraphStyle(
-        "Title", fontName=FONT_NAME, fontSize=16, alignment=TA_CENTER,
-        leading=22, wordWrap="RTL",
-    )
-    heading_style = ParagraphStyle(
-        "Heading", fontName=FONT_NAME, fontSize=12, alignment=TA_RIGHT,
-        leading=16, wordWrap="RTL", textColor=colors.HexColor("#1a5276"),
-    )
-    body_style = ParagraphStyle(
-        "Body", fontName=FONT_NAME, fontSize=9, alignment=TA_RIGHT,
-        leading=12, wordWrap="RTL",
-    )
-    return title_style, heading_style, body_style
+def _bidi(text: str) -> str:
+    """Apply BiDi algorithm to convert logical Hebrew to visual order for PDF."""
+    return get_display(str(text))
 
 
-def _make_table(headers: List[str], data: List[List[str]], col_widths=None) -> Table:
-    """Build an RTL table (columns reversed for right-to-left reading)."""
-    reversed_headers = list(reversed(headers))
-    reversed_data = [list(reversed(row)) for row in data]
+# Colors
+CLR_HEADER_BG = (0.17, 0.24, 0.31)   # #2c3e50
+CLR_HEADING = (0.10, 0.32, 0.46)      # #1a5276
+CLR_ALT_ROW = (0.92, 0.95, 0.97)      # #eaf2f8
+CLR_GRID = (0.6, 0.6, 0.6)
 
-    table_data = [reversed_headers] + reversed_data
-    table = Table(table_data, colWidths=col_widths, repeatRows=1)
-    table.setStyle(TableStyle([
-        ("FONTNAME", (0, 0), (-1, -1), FONT_NAME),
-        ("FONTSIZE", (0, 0), (-1, 0), 9),
-        ("FONTSIZE", (0, 1), (-1, -1), 8),
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#2c3e50")),
-        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
-        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
-        ("ROWBACKGROUNDS", (0, 1), (-1, -1),
-         [colors.white, colors.HexColor("#eaf2f8")]),
-        ("TOPPADDING", (0, 0), (-1, -1), 3),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
-    ]))
-    return table
+
+class _PdfWriter:
+    """Canvas-based PDF writer with RTL table support."""
+
+    def __init__(self, path: str):
+        self.c = canvas.Canvas(path, pagesize=A4)
+        self.page_w, self.page_h = A4
+        self.margin = 15 * mm
+        self.y = self.page_h - self.margin
+        self.content_w = self.page_w - 2 * self.margin
+
+    def _check_space(self, needed: float):
+        if self.y - needed < self.margin:
+            self.c.showPage()
+            self.y = self.page_h - self.margin
+
+    def draw_title(self, text: str):
+        self._check_space(25)
+        self.c.setFont(FONT_NAME, 16)
+        self.c.setFillColorRGB(0, 0, 0)
+        self.c.drawCentredString(self.page_w / 2, self.y, _bidi(text))
+        self.y -= 25
+
+    def draw_heading(self, text: str):
+        self._check_space(22)
+        self.y -= 6
+        self.c.setFont(FONT_NAME, 12)
+        self.c.setFillColorRGB(*CLR_HEADING)
+        self.c.drawRightString(self.page_w - self.margin, self.y, _bidi(text))
+        self.c.setFillColorRGB(0, 0, 0)
+        self.y -= 16
+
+    def draw_text(self, text: str, size: int = 9):
+        self._check_space(14)
+        self.c.setFont(FONT_NAME, size)
+        self.c.setFillColorRGB(0, 0, 0)
+        self.c.drawRightString(self.page_w - self.margin, self.y, _bidi(text))
+        self.y -= 14
+
+    def draw_kv_table(self, rows: List[List[str]]):
+        """Draw a simple 2-column key-value table (RTL)."""
+        row_h = 18
+        total_h = len(rows) * row_h
+        self._check_space(total_h + 5)
+
+        x_right = self.page_w - self.margin
+        col1_w = 55 * mm  # label column (right)
+        col2_w = self.content_w - col1_w  # value column (left)
+
+        for i, (label, value) in enumerate(rows):
+            row_y = self.y - (i * row_h)
+            # Alternating background
+            if i % 2 == 1:
+                self.c.setFillColorRGB(*CLR_ALT_ROW)
+                self.c.rect(self.margin, row_y - 4, self.content_w, row_h, fill=1, stroke=0)
+            # Grid lines
+            self.c.setStrokeColorRGB(*CLR_GRID)
+            self.c.setLineWidth(0.3)
+            self.c.line(self.margin, row_y - 4, x_right, row_y - 4)
+            # Label (right-aligned, right column)
+            self.c.setFillColorRGB(0, 0, 0)
+            self.c.setFont(FONT_NAME, 10)
+            self.c.drawRightString(x_right - 3, row_y + 2, _bidi(label))
+            # Value (right-aligned in left column)
+            self.c.drawRightString(x_right - col1_w - 3, row_y + 2, _bidi(value))
+
+        self.y -= total_h + 8
+
+    def draw_data_table(self, headers: List[str], rows: List[List[str]],
+                        col_widths: List[float]):
+        """Draw a data table with header row. Columns in RTL order."""
+        row_h = 16
+        header_h = 20
+        # Reverse for RTL display
+        headers = list(reversed(headers))
+        rows = [list(reversed(r)) for r in rows]
+        col_widths = list(reversed(col_widths))
+
+        total_h = header_h + len(rows) * row_h
+        self._check_space(min(total_h, 200))  # at least header + a few rows
+
+        x_left = self.margin
+
+        def _draw_row(cells, y, h, is_header=False, bg=None):
+            # Background
+            if is_header:
+                self.c.setFillColorRGB(*CLR_HEADER_BG)
+                self.c.rect(x_left, y - 4, self.content_w, h, fill=1, stroke=0)
+            elif bg:
+                self.c.setFillColorRGB(*bg)
+                self.c.rect(x_left, y - 4, self.content_w, h, fill=1, stroke=0)
+
+            # Cell text
+            if is_header:
+                self.c.setFillColorRGB(1, 1, 1)
+                self.c.setFont(FONT_NAME, 9)
+            else:
+                self.c.setFillColorRGB(0, 0, 0)
+                self.c.setFont(FONT_NAME, 8)
+
+            x = x_left
+            for j, cell_text in enumerate(cells):
+                cw = col_widths[j] if j < len(col_widths) else 30 * mm
+                display_text = _bidi(cell_text)
+                # Center text in cell
+                text_w = self.c.stringWidth(display_text, FONT_NAME,
+                                            9 if is_header else 8)
+                text_x = x + (cw - text_w) / 2
+                self.c.drawString(text_x, y + 2, display_text)
+                x += cw
+
+            # Grid lines
+            self.c.setStrokeColorRGB(*CLR_GRID)
+            self.c.setLineWidth(0.5)
+            self.c.line(x_left, y - 4, x_left + self.content_w, y - 4)
+            # Vertical lines
+            x = x_left
+            for cw in col_widths:
+                self.c.line(x, y - 4, x, y - 4 + h)
+                x += cw
+            self.c.line(x, y - 4, x, y - 4 + h)
+
+        # Draw header
+        _draw_row(headers, self.y, header_h, is_header=True)
+        self.y -= header_h
+
+        # Draw data rows
+        for i, row in enumerate(rows):
+            self._check_space(row_h + 5)
+            bg = CLR_ALT_ROW if i % 2 == 1 else None
+            _draw_row(row, self.y, row_h, bg=bg)
+            self.y -= row_h
+
+        # Bottom border
+        self.c.line(x_left, self.y + row_h - 4, x_left + self.content_w,
+                    self.y + row_h - 4)
+        self.y -= 8
+
+    def spacer(self, h: float = 8):
+        self.y -= h
+
+    def save(self):
+        self.c.save()
 
 
 def generate_pdf(report: ReportData, output_path: str) -> str:
     """Generate the PDF report. Returns the output path."""
     _register_font()
-    title_style, heading_style, body_style = _build_styles()
-
-    doc = SimpleDocTemplate(
-        output_path, pagesize=A4,
-        leftMargin=15 * mm, rightMargin=15 * mm,
-        topMargin=15 * mm, bottomMargin=15 * mm,
-    )
-
-    elements = []
+    pdf = _PdfWriter(output_path)
     now = datetime.datetime.now().strftime("%d/%m/%Y %H:%M")
 
     # ── Title ──
-    elements.append(Paragraph(
-        f"דוח תקצוב והתחשבנות — {report.municipality}", title_style
-    ))
-    elements.append(Spacer(1, 4 * mm))
+    pdf.draw_title(f"דוח תקצוב והתחשבנות — {report.municipality}")
+    pdf.spacer(6)
 
     # ── Section 1: Executive Summary ──
-    elements.append(Paragraph("סיכום מנהלים", heading_style))
-    elements.append(Spacer(1, 2 * mm))
-
-    summary_data = [
+    pdf.draw_heading("סיכום מנהלים")
+    pdf.draw_kv_table([
         ["רשות", report.municipality],
         ["חודש דיווח", report.month],
         ["אחוז מימון מצטבר", report.funding_pct],
@@ -302,28 +403,11 @@ def generate_pdf(report: ReportData, output_path: str) -> str:
         ['סה"כ הוצאה מצטברת', _fmt_num(report.total_expense)],
         ["סעיפים פעילים", str(report.active_count)],
         ["תאריך הפקה", now],
-    ]
-    summary_table = Table(
-        [list(reversed(r)) for r in summary_data],
-        colWidths=[120 * mm, 50 * mm],
-    )
-    summary_table.setStyle(TableStyle([
-        ("FONTNAME", (0, 0), (-1, -1), FONT_NAME),
-        ("FONTSIZE", (0, 0), (-1, -1), 10),
-        ("ALIGN", (0, 0), (0, -1), "LEFT"),
-        ("ALIGN", (1, 0), (1, -1), "RIGHT"),
-        ("GRID", (0, 0), (-1, -1), 0.3, colors.lightgrey),
-        ("TOPPADDING", (0, 0), (-1, -1), 3),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
-    ]))
-    elements.append(summary_table)
-    elements.append(Spacer(1, 8 * mm))
+    ])
+    pdf.spacer(10)
 
     # ── Section 2: Underutilized (balance > 20% of annual) ──
-    elements.append(Paragraph(
-        "סעיפים עם תקציב לא מנוצל (יתרה > 20% מהקצבה)", heading_style
-    ))
-    elements.append(Spacer(1, 2 * mm))
+    pdf.draw_heading("סעיפים עם תקציב לא מנוצל (יתרה > 20% מהקצבה)")
 
     underutilized = [
         r for r in report.rows
@@ -332,28 +416,23 @@ def generate_pdf(report: ReportData, output_path: str) -> str:
     underutilized.sort(key=lambda r: r.balance, reverse=True)
 
     if underutilized:
-        headers = ["שם סעיף", "סמל", "הקצבה שנתית", "הוצאה מצטברת", "יתרה", "% ניצול"]
+        headers = ["שם סעיף", "סמל", "הקצבה שנתית", "הוצאה מצטברת", "יתרה",
+                   "% ניצול"]
         data = [
-            [
-                r.name, r.semel,
-                _fmt_num(r.budget_annual), _fmt_num(r.expense_cumulative),
-                _fmt_num(r.balance), f"{r.utilization_pct}%",
-            ]
+            [r.name, r.semel, _fmt_num(r.budget_annual),
+             _fmt_num(r.expense_cumulative), _fmt_num(r.balance),
+             f"{r.utilization_pct}%"]
             for r in underutilized
         ]
         col_widths = [55 * mm, 22 * mm, 28 * mm, 28 * mm, 25 * mm, 20 * mm]
-        col_widths.reverse()
-        elements.append(_make_table(headers, data, col_widths))
+        pdf.draw_data_table(headers, data, col_widths)
     else:
-        elements.append(Paragraph("אין סעיפים עם יתרה מעל 20%.", body_style))
+        pdf.draw_text(".אין סעיפים עם יתרה מעל 20%")
 
-    elements.append(Spacer(1, 8 * mm))
+    pdf.spacer(10)
 
     # ── Section 3: Overbudget (expense > budget) ──
-    elements.append(Paragraph(
-        "סעיפים עם חריגה (הוצאה > הקצבה)", heading_style
-    ))
-    elements.append(Spacer(1, 2 * mm))
+    pdf.draw_heading("סעיפים עם חריגה (הוצאה > הקצבה)")
 
     overbudget = [
         r for r in report.rows
@@ -364,22 +443,20 @@ def generate_pdf(report: ReportData, output_path: str) -> str:
     )
 
     if overbudget:
-        headers = ["שם סעיף", "סמל", "הקצבה שנתית", "הוצאה מצטברת", "סכום חריגה"]
+        headers = ["שם סעיף", "סמל", "הקצבה שנתית", "הוצאה מצטברת",
+                   "סכום חריגה"]
         data = [
-            [
-                r.name, r.semel,
-                _fmt_num(r.budget_annual), _fmt_num(r.expense_cumulative),
-                _fmt_num(r.expense_cumulative - r.budget_annual),
-            ]
+            [r.name, r.semel, _fmt_num(r.budget_annual),
+             _fmt_num(r.expense_cumulative),
+             _fmt_num(r.expense_cumulative - r.budget_annual)]
             for r in overbudget
         ]
         col_widths = [55 * mm, 22 * mm, 30 * mm, 30 * mm, 30 * mm]
-        col_widths.reverse()
-        elements.append(_make_table(headers, data, col_widths))
+        pdf.draw_data_table(headers, data, col_widths)
     else:
-        elements.append(Paragraph("אין סעיפים עם חריגה תקציבית.", body_style))
+        pdf.draw_text(".אין סעיפים עם חריגה תקציבית")
 
-    doc.build(elements)
+    pdf.save()
     return output_path
 
 
