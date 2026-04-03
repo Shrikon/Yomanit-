@@ -536,6 +536,7 @@ function WelfareDashboard({ muni, onNewIntake, refreshKey }: { muni: any, onNewI
                       </span>
                     </td>
                     <td className="p-2.5 flex gap-2">
+                      <button onClick={() => window.open(`${API}/journal-entries/${e.id}/welfare-report`, '_blank')} className="text-xs text-green-600 hover:underline font-medium">דוח לגזבר</button>
                       <button onClick={() => window.open(`${API}/journal-entries/${e.id}/export`, '_blank')} className="text-xs text-blue-600 hover:underline">Excel</button>
                       {e.status !== 'locked' && <button onClick={() => deleteEntry(e.id, e.reference_num)} className="text-xs text-red-400 hover:underline">מחק</button>}
                     </td>

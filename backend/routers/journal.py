@@ -440,3 +440,156 @@ async def export_journal_entry(entry_id: str):
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f"attachment; filename={filename}"},
     )
+
+
+# =============================================
+# GET /journal-entries/{id}/welfare-report
+# דוח רווחה לגזבר – Excel מעוצב
+# =============================================
+
+@router.get("/{entry_id}/welfare-report")
+async def welfare_report_for_treasurer(entry_id: str):
+    import io
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from openpyxl.utils import get_column_letter
+    from fastapi.responses import StreamingResponse
+    import urllib.parse
+
+    entry = await get_journal_entry(entry_id)
+
+    # ודא שזו פקודת רווחה
+    template_key = entry.get("template_key") or entry.get("source_type") or ""
+    if template_key != "welfare":
+        raise HTTPException(status_code=400, detail="דוח זה זמין רק לפקודות רווחה")
+
+    muni_name = entry.get("municipality_name", "")
+    period = entry["period"]
+    ref_num = entry["reference_num"]
+    lines = entry["lines"]
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "דוח רווחה לגזבר"
+    ws.sheet_view.rightToLeft = True
+
+    HEADER_BG = "1F4E79"
+    TITLE_BG = "D6E4F0"
+    ALT_BG = "F2F7FB"
+    TOTAL_BG = "E2EFDA"
+    thin = Side(style="thin", color="AAAAAA")
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+
+    # כותרת ראשית
+    NUM_COLS = 7
+    ws.merge_cells(f"A1:{get_column_letter(NUM_COLS)}1")
+    ws["A1"] = f"דוח רווחה לגזבר — {muni_name}"
+    ws["A1"].font = Font(bold=True, size=14, color="1F4E79")
+    ws["A1"].fill = PatternFill("solid", fgColor=TITLE_BG)
+    ws["A1"].alignment = Alignment(horizontal="center", vertical="center")
+    ws.row_dimensions[1].height = 32
+
+    # שורת פרטים
+    ws.merge_cells(f"A2:{get_column_letter(NUM_COLS)}2")
+    ws["A2"] = f"תקופה: {period}  |  מספר פקודה: {ref_num}  |  סטטוס: {entry.get('status', '')}"
+    ws["A2"].font = Font(size=10, color="333333")
+    ws["A2"].fill = PatternFill("solid", fgColor=TITLE_BG)
+    ws["A2"].alignment = Alignment(horizontal="center")
+    ws.row_dimensions[2].height = 22
+
+    # כותרות עמודות
+    headers = ["#", "סמל סעיף", "תיאור", "חשבון", "חובה", "זכות", "ח/ז"]
+    widths = [6, 14, 36, 18, 16, 16, 8]
+    for col, (h, w) in enumerate(zip(headers, widths), 1):
+        cell = ws.cell(row=4, column=col, value=h)
+        cell.font = Font(bold=True, color="FFFFFF", size=10)
+        cell.fill = PatternFill("solid", fgColor=HEADER_BG)
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+        cell.border = border
+        ws.column_dimensions[get_column_letter(col)].width = w
+    ws.row_dimensions[4].height = 22
+
+    # שורות נתונים
+    total_debit = 0.0
+    total_credit = 0.0
+    row_num = 5
+    for i, line in enumerate(lines, 1):
+        debit_amt = round(float(line["debit"] or 0), 2)
+        credit_amt = round(float(line["credit"] or 0), 2)
+        if debit_amt == 0 and credit_amt == 0:
+            continue
+        total_debit += debit_amt
+        total_credit += credit_amt
+
+        side_label = "חובה" if debit_amt > 0 else "זכות"
+        fill = PatternFill("solid", fgColor=ALT_BG if i % 2 == 0 else "FFFFFF")
+
+        vals = [
+            i,
+            (line.get("key_value") or line.get("reference") or "").strip(),
+            (line.get("description") or "").strip(),
+            (line.get("account") or "").strip(),
+            debit_amt if debit_amt > 0 else "",
+            credit_amt if credit_amt > 0 else "",
+            side_label,
+        ]
+        for col, val in enumerate(vals, 1):
+            cell = ws.cell(row=row_num, column=col, value=val)
+            cell.fill = fill
+            cell.border = border
+            cell.font = Font(size=10)
+            cell.alignment = Alignment(horizontal="right" if col != 3 else "right", vertical="center")
+            if col in (5, 6) and val != "":
+                cell.number_format = "#,##0.00"
+        row_num += 1
+
+    # שורת סיכום
+    ws.merge_cells(f"A{row_num}:C{row_num}")
+    sum_cell = ws.cell(row=row_num, column=1, value='סה"כ')
+    sum_cell.font = Font(bold=True, size=11, color="1F4E79")
+    sum_cell.fill = PatternFill("solid", fgColor=TOTAL_BG)
+    sum_cell.alignment = Alignment(horizontal="center")
+    sum_cell.border = border
+    for col in range(2, 4):
+        c = ws.cell(row=row_num, column=col)
+        c.fill = PatternFill("solid", fgColor=TOTAL_BG)
+        c.border = border
+
+    ws.cell(row=row_num, column=4, value="").fill = PatternFill("solid", fgColor=TOTAL_BG)
+    ws.cell(row=row_num, column=4).border = border
+
+    debit_cell = ws.cell(row=row_num, column=5, value=total_debit)
+    debit_cell.font = Font(bold=True, size=11)
+    debit_cell.fill = PatternFill("solid", fgColor=TOTAL_BG)
+    debit_cell.number_format = "#,##0.00"
+    debit_cell.border = border
+
+    credit_cell = ws.cell(row=row_num, column=6, value=total_credit)
+    credit_cell.font = Font(bold=True, size=11)
+    credit_cell.fill = PatternFill("solid", fgColor=TOTAL_BG)
+    credit_cell.number_format = "#,##0.00"
+    credit_cell.border = border
+
+    ws.cell(row=row_num, column=7, value="").fill = PatternFill("solid", fgColor=TOTAL_BG)
+    ws.cell(row=row_num, column=7).border = border
+
+    # שורת הפרש
+    diff = round(total_debit - total_credit, 2)
+    row_num += 1
+    ws.merge_cells(f"A{row_num}:D{row_num}")
+    diff_label = ws.cell(row=row_num, column=1, value=f"הפרש: ₪{abs(diff):,.2f}" if diff != 0 else "מאוזן ✓")
+    diff_label.font = Font(bold=True, size=10, color="006100" if diff == 0 else "C00000")
+    diff_label.alignment = Alignment(horizontal="center")
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+
+    filename_ascii = f"welfare_report_{ref_num}_{period}.xlsx"
+    filename_utf8 = urllib.parse.quote(f"דוח_רווחה_{muni_name}_{period}.xlsx")
+
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename_ascii}"; filename*=UTF-8\'\'{filename_utf8}'},
+    )
