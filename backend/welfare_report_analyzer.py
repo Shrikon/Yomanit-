@@ -42,6 +42,13 @@ COL_MASLUL = 22    # מסלול תשלום (summary rows have ' ')
 COL_NAME = 24      # שם סעיף
 
 
+MONTHS_HE = {
+    'ינואר': 1, 'פברואר': 2, 'מרץ': 3, 'אפריל': 4,
+    'מאי': 5, 'יוני': 6, 'יולי': 7, 'אוגוסט': 8,
+    'ספטמבר': 9, 'אוקטובר': 10, 'נובמבר': 11, 'דצמבר': 12,
+}
+
+
 @dataclass
 class SectionRow:
     name: str
@@ -51,12 +58,15 @@ class SectionRow:
     balance: float
     charge_month: float
     utilization_pct: float
+    budget_proportional: float  # הקצבה שנתית × (חודש / 12)
+    difference: float           # הוצאה מצטברת − תקציב יחסי
 
 
 @dataclass
 class ReportData:
     municipality: str
     month: str
+    month_number: int
     funding_pct: str
     total_budget: float
     total_expense: float
@@ -146,6 +156,15 @@ def parse_excel(path: str) -> ReportData:
     month = _safe_str(_cell(all_rows, 4, 14))
     funding_pct = _safe_str(_cell(all_rows, 2, 19))
 
+    # Resolve month number from Hebrew name
+    month_number = MONTHS_HE.get(month, 0)
+    if month_number == 0:
+        # Try matching partial name
+        for name_he, num in MONTHS_HE.items():
+            if name_he in month or month in name_he:
+                month_number = num
+                break
+
     # Find header row containing 'חיוב בחודש זה'
     header_row_idx = None
     for i in range(min(15, len(all_rows))):
@@ -187,6 +206,8 @@ def parse_excel(path: str) -> ReportData:
 
         utilization = (expense / budget * 100) if budget != 0 else 0.0
         semel = semel_map.get(name, "")
+        proportional = budget * (month_number / 12) if month_number else 0.0
+        diff = expense - proportional
 
         seen_names[name] = SectionRow(
             name=name,
@@ -196,6 +217,8 @@ def parse_excel(path: str) -> ReportData:
             balance=balance,
             charge_month=charge,
             utilization_pct=round(utilization, 1),
+            budget_proportional=round(proportional, 2),
+            difference=round(diff, 2),
         )
 
     wb.close()
@@ -207,6 +230,7 @@ def parse_excel(path: str) -> ReportData:
     return ReportData(
         municipality=municipality,
         month=month,
+        month_number=month_number,
         funding_pct=funding_pct,
         total_budget=total_budget,
         total_expense=total_expense,
@@ -306,74 +330,113 @@ class _PdfWriter:
 
         self.y -= total_h + 8
 
-    def draw_data_table(self, headers: List[str], rows: List[List[str]],
-                        col_widths: List[float]):
-        """Draw a data table with header row. Columns in RTL order."""
-        row_h = 16
-        header_h = 20
+    def _truncate(self, text: str, max_w: float, font_size: float) -> str:
+        """Truncate text with '...' if it exceeds max_w."""
+        if self.c.stringWidth(text, FONT_NAME, font_size) <= max_w:
+            return text
+        while len(text) > 1:
+            text = text[:-1]
+            if self.c.stringWidth(text + "...", FONT_NAME, font_size) <= max_w:
+                return text + "..."
+        return "..."
+
+    def draw_data_table(self, headers: List[str], rows: List[List[str]]):
+        """Draw a data table with auto-sized columns. Columns in RTL order."""
+        ROW_H = 20
+        HEADER_H = 22
+        CELL_PAD = 6          # horizontal padding inside cell
+        HEADER_FONT = 7.5
+        DATA_FONT = 7.5
+
         # Reverse for RTL display
         headers = list(reversed(headers))
         rows = [list(reversed(r)) for r in rows]
-        col_widths = list(reversed(col_widths))
+        num_cols = len(headers)
 
-        total_h = header_h + len(rows) * row_h
-        self._check_space(min(total_h, 200))  # at least header + a few rows
+        # ── Auto-size columns ──
+        # Measure widest content per column (header + all data rows)
+        min_widths = []
+        for col_idx in range(num_cols):
+            hw = self.c.stringWidth(_bidi(headers[col_idx]),
+                                    FONT_NAME, HEADER_FONT)
+            max_data = 0
+            for row in rows:
+                if col_idx < len(row):
+                    dw = self.c.stringWidth(_bidi(row[col_idx]),
+                                            FONT_NAME, DATA_FONT)
+                    if dw > max_data:
+                        max_data = dw
+            min_widths.append(max(hw, max_data) + CELL_PAD)
+
+        total_natural = sum(min_widths)
+
+        if total_natural <= self.content_w:
+            # Distribute remaining space proportionally
+            extra = self.content_w - total_natural
+            col_widths_final = [w + extra * (w / total_natural)
+                                for w in min_widths]
+        else:
+            # Shrink proportionally — longest columns shrink most
+            col_widths_final = [w * (self.content_w / total_natural)
+                                for w in min_widths]
 
         x_left = self.margin
+        total_w = sum(col_widths_final)
 
         def _draw_row(cells, y, h, is_header=False, bg=None):
             # Background
             if is_header:
                 self.c.setFillColorRGB(*CLR_HEADER_BG)
-                self.c.rect(x_left, y - 4, self.content_w, h, fill=1, stroke=0)
+                self.c.rect(x_left, y - 4, total_w, h, fill=1, stroke=0)
             elif bg:
                 self.c.setFillColorRGB(*bg)
-                self.c.rect(x_left, y - 4, self.content_w, h, fill=1, stroke=0)
+                self.c.rect(x_left, y - 4, total_w, h, fill=1, stroke=0)
 
-            # Cell text
+            fs = HEADER_FONT if is_header else DATA_FONT
             if is_header:
                 self.c.setFillColorRGB(1, 1, 1)
-                self.c.setFont(FONT_NAME, 9)
             else:
                 self.c.setFillColorRGB(0, 0, 0)
-                self.c.setFont(FONT_NAME, 8)
+            self.c.setFont(FONT_NAME, fs)
 
             x = x_left
             for j, cell_text in enumerate(cells):
-                cw = col_widths[j] if j < len(col_widths) else 30 * mm
-                display_text = _bidi(cell_text)
-                # Center text in cell
-                text_w = self.c.stringWidth(display_text, FONT_NAME,
-                                            9 if is_header else 8)
-                text_x = x + (cw - text_w) / 2
-                self.c.drawString(text_x, y + 2, display_text)
+                cw = col_widths_final[j] if j < len(col_widths_final) \
+                    else col_widths_final[-1]
+                usable = cw - CELL_PAD
+                display_text = _bidi(self._truncate(cell_text, usable, fs))
+                text_w = self.c.stringWidth(display_text, FONT_NAME, fs)
+                text_x = x + (cw - text_w) / 2  # center in cell
+                self.c.drawString(text_x, y + 4, display_text)
                 x += cw
 
-            # Grid lines
+            # Grid
             self.c.setStrokeColorRGB(*CLR_GRID)
             self.c.setLineWidth(0.5)
-            self.c.line(x_left, y - 4, x_left + self.content_w, y - 4)
+            # Horizontal line at bottom of row
+            self.c.line(x_left, y - 4, x_left + total_w, y - 4)
             # Vertical lines
             x = x_left
-            for cw in col_widths:
+            for cw in col_widths_final:
                 self.c.line(x, y - 4, x, y - 4 + h)
                 x += cw
             self.c.line(x, y - 4, x, y - 4 + h)
 
-        # Draw header
-        _draw_row(headers, self.y, header_h, is_header=True)
-        self.y -= header_h
+        # ── Draw header ──
+        self._check_space(HEADER_H + ROW_H + 10)
+        _draw_row(headers, self.y, HEADER_H, is_header=True)
+        self.y -= HEADER_H
 
-        # Draw data rows
+        # ── Draw data rows ──
         for i, row in enumerate(rows):
-            self._check_space(row_h + 5)
+            self._check_space(ROW_H + 5)
             bg = CLR_ALT_ROW if i % 2 == 1 else None
-            _draw_row(row, self.y, row_h, bg=bg)
-            self.y -= row_h
+            _draw_row(row, self.y, ROW_H, bg=bg)
+            self.y -= ROW_H
 
-        # Bottom border
-        self.c.line(x_left, self.y + row_h - 4, x_left + self.content_w,
-                    self.y + row_h - 4)
+        # Top border of last row (bottom of table)
+        self.c.line(x_left, self.y + ROW_H - 4, x_left + total_w,
+                    self.y + ROW_H - 4)
         self.y -= 8
 
     def spacer(self, h: float = 8):
@@ -395,12 +458,17 @@ def generate_pdf(report: ReportData, output_path: str) -> str:
 
     # ── Section 1: Executive Summary ──
     pdf.draw_heading("סיכום מנהלים")
+    total_proportional = sum(r.budget_proportional for r in report.rows)
+    total_diff = sum(r.difference for r in report.rows)
+
     pdf.draw_kv_table([
         ["רשות", report.municipality],
-        ["חודש דיווח", report.month],
+        ["חודש דיווח", f"{report.month} ({report.month_number}/12)"],
         ["אחוז מימון מצטבר", report.funding_pct],
         ['סה"כ הקצבה שנתית', _fmt_num(report.total_budget)],
+        ["תקציב יחסי לתקופה", _fmt_num(total_proportional)],
         ['סה"כ הוצאה מצטברת', _fmt_num(report.total_expense)],
+        ["הפרש מצטבר", _fmt_num(total_diff)],
         ["סעיפים פעילים", str(report.active_count)],
         ["תאריך הפקה", now],
     ])
@@ -416,16 +484,16 @@ def generate_pdf(report: ReportData, output_path: str) -> str:
     underutilized.sort(key=lambda r: r.balance, reverse=True)
 
     if underutilized:
-        headers = ["שם סעיף", "סמל", "הקצבה שנתית", "הוצאה מצטברת", "יתרה",
-                   "% ניצול"]
+        headers = ["שם סעיף", "סמל", "הקצבה שנתית", "תקציב יחסי",
+                   "הוצאה מצטברת", "הפרש", "יתרה", "% ניצול"]
         data = [
             [r.name, r.semel, _fmt_num(r.budget_annual),
-             _fmt_num(r.expense_cumulative), _fmt_num(r.balance),
+             _fmt_num(r.budget_proportional), _fmt_num(r.expense_cumulative),
+             _fmt_num(r.difference), _fmt_num(r.balance),
              f"{r.utilization_pct}%"]
             for r in underutilized
         ]
-        col_widths = [55 * mm, 22 * mm, 28 * mm, 28 * mm, 25 * mm, 20 * mm]
-        pdf.draw_data_table(headers, data, col_widths)
+        pdf.draw_data_table(headers, data)
     else:
         pdf.draw_text(".אין סעיפים עם יתרה מעל 20%")
 
@@ -443,16 +511,16 @@ def generate_pdf(report: ReportData, output_path: str) -> str:
     )
 
     if overbudget:
-        headers = ["שם סעיף", "סמל", "הקצבה שנתית", "הוצאה מצטברת",
-                   "סכום חריגה"]
+        headers = ["שם סעיף", "סמל", "הקצבה שנתית", "תקציב יחסי",
+                   "הוצאה מצטברת", "הפרש", "חריגה שנתית"]
         data = [
             [r.name, r.semel, _fmt_num(r.budget_annual),
-             _fmt_num(r.expense_cumulative),
+             _fmt_num(r.budget_proportional), _fmt_num(r.expense_cumulative),
+             _fmt_num(r.difference),
              _fmt_num(r.expense_cumulative - r.budget_annual)]
             for r in overbudget
         ]
-        col_widths = [55 * mm, 22 * mm, 30 * mm, 30 * mm, 30 * mm]
-        pdf.draw_data_table(headers, data, col_widths)
+        pdf.draw_data_table(headers, data)
     else:
         pdf.draw_text(".אין סעיפים עם חריגה תקציבית")
 
