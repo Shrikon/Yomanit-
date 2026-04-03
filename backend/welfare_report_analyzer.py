@@ -4,19 +4,21 @@ welfare_report_analyzer.py – דוח PDF חודשי לגזבר מקובץ Excel
 Usage:
     python welfare_report_analyzer.py <path_to_excel> <output_pdf_path>
 
-מבנה הקובץ:
-    גיליון: 'דוח התחשבנות' / 'גרסה להדפסה'
-    עמודה 25: שם סעיף | עמודה 27: סמל סעיף
+מבנה הקובץ (גיליון 'דוח התחשבנות'):
+    שורה 4 עמודה 14: שם החודש | שורה 5 עמודה 14: שם הרשות
+    שורה 2 עמודה 19: אחוז מימון מצטבר
+    עמודה 24: שם סעיף | עמודה 22: מסלול תשלום
     עמודה 7: הקצבה שנתית | עמודה 6: הוצאה מצטברת
     עמודה 4: יתרת הקצבה | עמודה 2: חיוב בחודש זה
-    שורה 5 עמודה 15: שם החודש | שורה 6 עמודה 15: שם הרשות
-    שורה 3 עמודה 20: אחוז מימון מצטבר
+    סמל סעיף: נשלף מגיליון 'גרסה להדפסה' עמודה 13 (שורות כותרת סעיף)
+    שורות סיכום: col 22 == ' ' (whitespace), שורות משנה: col 22 == 'תשלומי ממשלה' וכו'
 """
 
+import re
 import sys
 import datetime
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
+from typing import List, Dict, Optional
 
 import openpyxl
 from reportlab.lib import colors
@@ -33,20 +35,14 @@ from reportlab.lib.enums import TA_RIGHT, TA_CENTER
 # ── Constants ─────────────────────────────────────────────────────────
 FONT_PATH = r"C:\Windows\Fonts\arial.ttf"
 FONT_NAME = "Arial"
-SHEET_NAMES = ["דוח התחשבנות", "גרסה להדפסה"]
 
-# Column indices (0-based)
-COL_CHARGE_MONTH = 2   # חיוב בחודש זה
-COL_BALANCE = 4        # יתרת הקצבה כספית
-COL_EXPENSE_CUM = 6    # הוצאה מצטברת
-COL_BUDGET_ANNUAL = 7  # הקצבה שנתית
-COL_NAME = 25          # שם סעיף
-COL_SEMEL = 27         # סמל סעיף
-
-# Header metadata cell positions (row, col) — 0-based
-POS_MONTH = (4, 15)        # שורה 5, עמודה 15
-POS_MUNICIPALITY = (5, 15) # שורה 6, עמודה 15
-POS_FUNDING_PCT = (2, 20)  # שורה 3, עמודה 20
+# Sheet 1 ('דוח התחשבנות') column indices (0-based)
+COL_CHARGE = 2     # חיוב בחודש זה
+COL_BALANCE = 4    # יתרת הקצבה כספית
+COL_EXPENSE = 6    # הוצאות להתחשבנות מצטברת
+COL_BUDGET = 7     # הקצבה שנתית בשקלים 100%
+COL_MASLUL = 22    # מסלול תשלום (summary rows have ' ')
+COL_NAME = 24      # שם סעיף
 
 
 @dataclass
@@ -57,7 +53,7 @@ class SectionRow:
     expense_cumulative: float
     balance: float
     charge_month: float
-    utilization_pct: float  # אחוז ניצול
+    utilization_pct: float
 
 
 @dataclass
@@ -88,34 +84,72 @@ def _safe_str(val) -> str:
     return str(val).strip()
 
 
-def _find_sheet(wb: openpyxl.Workbook) -> openpyxl.worksheet.worksheet.Worksheet:
-    for name in SHEET_NAMES:
-        if name in wb.sheetnames:
-            return wb[name]
-    raise ValueError(
-        f"גיליון לא נמצא. צפוי: {SHEET_NAMES}. קיימים: {wb.sheetnames}"
-    )
+def _cell(all_rows, row_idx: int, col_idx: int):
+    """Get cell value by 0-based row/col index."""
+    if row_idx < len(all_rows) and col_idx < len(all_rows[row_idx]):
+        return all_rows[row_idx][col_idx].value
+    return None
+
+
+def _extract_semel_from_text(text: str) -> Optional[str]:
+    """Extract 6-digit semel from section header like '230090242410 שם סעיף'."""
+    m = re.search(r'(\d{6,})', text.strip())
+    if m:
+        digits = m.group(1)
+        # Last 6 digits for long codes, full number for shorter
+        return digits[-6:] if len(digits) >= 12 else digits
+    return None
+
+
+def _build_semel_map(wb: openpyxl.Workbook) -> Dict[str, str]:
+    """Build name→semel map from sheet 'גרסה להדפסה' section headers."""
+    semel_map: Dict[str, str] = {}
+    if "גרסה להדפסה" not in wb.sheetnames:
+        return semel_map
+
+    ws = wb["גרסה להדפסה"]
+    for row in ws.rows:
+        # Section header rows: only col 13 has text, rest are empty/None
+        if len(row) <= 13:
+            continue
+        val = row[13].value
+        if not val or not isinstance(val, str):
+            continue
+        val = val.strip()
+        # Section header pattern: digits followed by Hebrew text
+        m = re.match(r'(\d+)\s+(.+)', val)
+        if m:
+            semel = _extract_semel_from_text(m.group(1))
+            name = m.group(2).strip()
+            if semel and name:
+                semel_map[name] = semel
+
+    return semel_map
 
 
 def parse_excel(path: str) -> ReportData:
     """קרא קובץ Excel של דוח התחשבנות והחזר ReportData."""
     wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
-    ws = _find_sheet(wb)
 
-    # Read all rows into a list for indexed access
+    # Build semel lookup from sheet 2
+    semel_map = _build_semel_map(wb)
+
+    # Open sheet 1
+    if "דוח התחשבנות" in wb.sheetnames:
+        ws = wb["דוח התחשבנות"]
+    elif "גרסה להדפסה" in wb.sheetnames:
+        ws = wb["גרסה להדפסה"]
+    else:
+        raise ValueError(f"גיליון לא נמצא. קיימים: {wb.sheetnames}")
+
     all_rows = list(ws.rows)
 
-    def cell(row_idx: int, col_idx: int):
-        if row_idx < len(all_rows) and col_idx < len(all_rows[row_idx]):
-            return all_rows[row_idx][col_idx].value
-        return None
+    # Metadata (0-indexed positions verified from actual file)
+    municipality = _safe_str(_cell(all_rows, 5, 14))
+    month = _safe_str(_cell(all_rows, 4, 14))
+    funding_pct = _safe_str(_cell(all_rows, 2, 19))
 
-    # Header metadata
-    municipality = _safe_str(cell(*POS_MUNICIPALITY))
-    month = _safe_str(cell(*POS_MONTH))
-    funding_pct = _safe_str(cell(*POS_FUNDING_PCT))
-
-    # Find the header row (look for "חיוב בחודש זה" in first 15 rows)
+    # Find header row containing 'חיוב בחודש זה'
     header_row_idx = None
     for i in range(min(15, len(all_rows))):
         for c in all_rows[i]:
@@ -126,28 +160,38 @@ def parse_excel(path: str) -> ReportData:
             break
 
     if header_row_idx is None:
-        # Fallback: assume data starts at row 8
-        header_row_idx = 7
+        header_row_idx = 8  # fallback
 
-    # Parse data rows
-    rows: List[SectionRow] = []
+    # Parse data — take only summary rows (col 22 is whitespace or empty)
+    seen_names: dict = {}  # name → SectionRow (deduplicate)
     for i in range(header_row_idx + 1, len(all_rows)):
-        name = _safe_str(cell(i, COL_NAME))
-        if not name or "סה\"כ" in name or 'סה"כ' in name or "סה''כ" in name:
+        row = all_rows[i]
+        if len(row) <= COL_NAME:
             continue
 
-        semel = _safe_str(cell(i, COL_SEMEL))
-        budget = _safe_float(cell(i, COL_BUDGET_ANNUAL))
-        expense = _safe_float(cell(i, COL_EXPENSE_CUM))
-        balance = _safe_float(cell(i, COL_BALANCE))
-        charge = _safe_float(cell(i, COL_CHARGE_MONTH))
+        name = _safe_str(row[COL_NAME].value)
+        if not name:
+            continue
+        if 'סה"כ' in name or "סה''כ" in name:
+            continue
+
+        # Filter: only summary rows (col 22 is whitespace or empty)
+        maslul = _safe_str(row[COL_MASLUL].value) if len(row) > COL_MASLUL else ""
+        if maslul and maslul not in (" ", ""):
+            continue
+
+        budget = _safe_float(row[COL_BUDGET].value if len(row) > COL_BUDGET else None)
+        expense = _safe_float(row[COL_EXPENSE].value if len(row) > COL_EXPENSE else None)
+        balance = _safe_float(row[COL_BALANCE].value if len(row) > COL_BALANCE else None)
+        charge = _safe_float(row[COL_CHARGE].value if len(row) > COL_CHARGE else None)
 
         if budget == 0 and expense == 0 and balance == 0:
             continue
 
         utilization = (expense / budget * 100) if budget != 0 else 0.0
+        semel = semel_map.get(name, "")
 
-        rows.append(SectionRow(
+        seen_names[name] = SectionRow(
             name=name,
             semel=semel,
             budget_annual=budget,
@@ -155,10 +199,11 @@ def parse_excel(path: str) -> ReportData:
             balance=balance,
             charge_month=charge,
             utilization_pct=round(utilization, 1),
-        ))
+        )
 
     wb.close()
 
+    rows = list(seen_names.values())
     total_budget = sum(r.budget_annual for r in rows)
     total_expense = sum(r.expense_cumulative for r in rows)
 
@@ -180,7 +225,6 @@ def _register_font():
 
 
 def _fmt_num(val: float) -> str:
-    """Format number with thousands separator, no decimals for whole numbers."""
     if val == int(val):
         return f"{int(val):,}"
     return f"{val:,.2f}"
@@ -203,8 +247,7 @@ def _build_styles():
 
 
 def _make_table(headers: List[str], data: List[List[str]], col_widths=None) -> Table:
-    """Build an RTL table (headers + data rows reversed per row for RTL)."""
-    # Reverse columns for RTL display
+    """Build an RTL table (columns reversed for right-to-left reading)."""
     reversed_headers = list(reversed(headers))
     reversed_data = [list(reversed(row)) for row in data]
 
@@ -219,7 +262,8 @@ def _make_table(headers: List[str], data: List[List[str]], col_widths=None) -> T
         ("ALIGN", (0, 0), (-1, -1), "CENTER"),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
         ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
-        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#eaf2f8")]),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1),
+         [colors.white, colors.HexColor("#eaf2f8")]),
         ("TOPPADDING", (0, 0), (-1, -1), 3),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
     ]))
@@ -241,7 +285,9 @@ def generate_pdf(report: ReportData, output_path: str) -> str:
     now = datetime.datetime.now().strftime("%d/%m/%Y %H:%M")
 
     # ── Title ──
-    elements.append(Paragraph(f"דוח תקצוב והתחשבנות — {report.municipality}", title_style))
+    elements.append(Paragraph(
+        f"דוח תקצוב והתחשבנות — {report.municipality}", title_style
+    ))
     elements.append(Spacer(1, 4 * mm))
 
     # ── Section 1: Executive Summary ──
@@ -252,12 +298,11 @@ def generate_pdf(report: ReportData, output_path: str) -> str:
         ["רשות", report.municipality],
         ["חודש דיווח", report.month],
         ["אחוז מימון מצטבר", report.funding_pct],
-        ["סה\"כ הקצבה שנתית", _fmt_num(report.total_budget)],
-        ["סה\"כ הוצאה מצטברת", _fmt_num(report.total_expense)],
+        ['סה"כ הקצבה שנתית', _fmt_num(report.total_budget)],
+        ['סה"כ הוצאה מצטברת', _fmt_num(report.total_expense)],
         ["סעיפים פעילים", str(report.active_count)],
         ["תאריך הפקה", now],
     ]
-    # Reverse for RTL
     summary_table = Table(
         [list(reversed(r)) for r in summary_data],
         colWidths=[120 * mm, 50 * mm],
@@ -274,8 +319,10 @@ def generate_pdf(report: ReportData, output_path: str) -> str:
     elements.append(summary_table)
     elements.append(Spacer(1, 8 * mm))
 
-    # ── Section 2: Underutilized Sections (balance > 20% of annual budget) ──
-    elements.append(Paragraph("סעיפים עם תקציב לא מנוצל (יתרה > 20% מהקצבה)", heading_style))
+    # ── Section 2: Underutilized (balance > 20% of annual) ──
+    elements.append(Paragraph(
+        "סעיפים עם תקציב לא מנוצל (יתרה > 20% מהקצבה)", heading_style
+    ))
     elements.append(Spacer(1, 2 * mm))
 
     underutilized = [
@@ -302,8 +349,10 @@ def generate_pdf(report: ReportData, output_path: str) -> str:
 
     elements.append(Spacer(1, 8 * mm))
 
-    # ── Section 3: Overbudget Sections (expense > annual budget) ──
-    elements.append(Paragraph("סעיפים עם חריגה (הוצאה > הקצבה)", heading_style))
+    # ── Section 3: Overbudget (expense > budget) ──
+    elements.append(Paragraph(
+        "סעיפים עם חריגה (הוצאה > הקצבה)", heading_style
+    ))
     elements.append(Spacer(1, 2 * mm))
 
     overbudget = [
@@ -344,14 +393,14 @@ def main():
     excel_path = sys.argv[1]
     output_pdf = sys.argv[2]
 
-    print(f"[ANALYZER] קורא קובץ: {excel_path}")
     report = parse_excel(excel_path)
 
     print(f"[ANALYZER] רשות: {report.municipality}")
     print(f"[ANALYZER] חודש: {report.month}")
+    print(f"[ANALYZER] מימון מצטבר: {report.funding_pct}")
     print(f"[ANALYZER] סעיפים פעילים: {report.active_count}")
-    print(f"[ANALYZER] סה\"כ הקצבה: {_fmt_num(report.total_budget)}")
-    print(f"[ANALYZER] סה\"כ הוצאה: {_fmt_num(report.total_expense)}")
+    print(f'[ANALYZER] סה"כ הקצבה: {_fmt_num(report.total_budget)}')
+    print(f'[ANALYZER] סה"כ הוצאה: {_fmt_num(report.total_expense)}')
 
     underutilized = [
         r for r in report.rows
