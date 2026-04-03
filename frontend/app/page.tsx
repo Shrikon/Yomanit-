@@ -624,6 +624,10 @@ export default function App() {
   const [welfareResult, setWelfareResult] = useState<any>(null);
   const [welfareLoading, setWelfareLoading] = useState(false);
   const [welfareRefreshKey, setWelfareRefreshKey] = useState(0);
+  const [showGeneralSettings, setShowGeneralSettings] = useState(false);
+  const [generalSettings, setGeneralSettings] = useState<Record<string,string>>({});
+  const [generalSettingsLoading, setGeneralSettingsLoading] = useState(false);
+  const [generalSettingsSaved, setGeneralSettingsSaved] = useState(false);
   const [entries, setEntries] = useState<JournalEntry[]>([]);
   const [uploadResult, setUploadResult] = useState<UploadResult | null>(null);
   const [indexMap, setIndexMap] = useState<Record<number, string>>({});
@@ -690,6 +694,27 @@ export default function App() {
       await apiFetch(`/municipalities/${muni.id}/settings`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({template_name: 'bezeq', key: 'vendor_account', value: settings.vendor_account}) });
       setSettingsSaved(true); setTimeout(() => setSettingsSaved(false), 3000);
     } catch { setError('שגיאה בשמירה'); } finally { setLoading(false); }
+  }
+
+  async function loadGeneralSettings() {
+    if (!muni) return;
+    setGeneralSettingsLoading(true);
+    try {
+      const data = await apiFetch(`/municipalities/${muni.id}/general-settings`);
+      setGeneralSettings(data || {});
+    } catch { } finally { setGeneralSettingsLoading(false); }
+  }
+
+  async function saveGeneralSettings() {
+    if (!muni) return;
+    setGeneralSettingsLoading(true);
+    try {
+      await apiFetch(`/municipalities/${muni.id}/general-settings`, {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify(generalSettings),
+      });
+      setGeneralSettingsSaved(true); setTimeout(() => setGeneralSettingsSaved(false), 3000);
+    } catch { setError('שגיאה בשמירה'); } finally { setGeneralSettingsLoading(false); }
   }
 
   async function loadIndexes() {
@@ -876,13 +901,16 @@ export default function App() {
           <span className="text-gray-300">|</span>
           <span className="text-sm text-gray-600">{muni?.name}</span>
         </div>
-        <button onClick={() => setScreen('module')} className="text-xs text-gray-400 hover:text-gray-600">החלפת מודול</button>
+        <div className="flex items-center gap-3">
+          <button onClick={() => { setShowGeneralSettings(true); loadGeneralSettings(); }} className="text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1.5 rounded-lg transition-colors">⚙️ נתונים כלליים</button>
+          <button onClick={() => setScreen('module')} className="text-xs text-gray-400 hover:text-gray-600">החלפת מודול</button>
+        </div>
       </div>
 
-      <div className="bg-white border-b border-gray-200 px-4 flex gap-1">
+      <div className="bg-white border-b border-gray-200 px-4 flex gap-1 overflow-x-auto">
         {CATEGORIES.map(cat => (
-          <button key={cat.id} onClick={() => switchTab(cat.id)}
-            className={`flex items-center gap-1.5 px-4 py-3 text-sm border-b-2 transition-colors ${activeTab === cat.id ? 'border-blue-600 text-blue-700 font-medium' : 'border-transparent text-gray-500 hover:text-gray-700'} ${!cat.active && activeTab !== cat.id ? 'opacity-50' : ''}`}>
+          <button key={cat.id} onClick={() => { switchTab(cat.id); setShowGeneralSettings(false); }}
+            className={`flex items-center gap-1.5 px-4 py-3 text-sm border-b-2 transition-colors whitespace-nowrap ${activeTab === cat.id && !showGeneralSettings ? 'border-blue-600 text-blue-700 font-medium' : 'border-transparent text-gray-500 hover:text-gray-700'} ${!cat.active && activeTab !== cat.id ? 'opacity-50' : ''}`}>
             <span>{cat.icon}</span><span>{cat.label}</span>
           </button>
         ))}
@@ -923,13 +951,111 @@ export default function App() {
         <div className="flex-1 overflow-auto p-6">
           {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg p-3 mb-4">{error}</div>}
 
-          {activeTab === 'celcom' && <CelcomDashboard muni={muni} view={celcomView} setView={setCelcomView} />}
+          {showGeneralSettings && (
+            <div className="max-w-2xl mx-auto">
+              <div className="flex justify-between items-center mb-6">
+                <div>
+                  <h1 className="text-lg font-semibold text-gray-900">נתונים כלליים</h1>
+                  <p className="text-xs text-gray-500">{muni?.name} — הגדרות כלליות לרשות</p>
+                </div>
+                <button onClick={() => setShowGeneralSettings(false)} className="text-xs text-gray-400 hover:text-gray-600 border border-gray-200 rounded-lg px-3 py-1.5">✕ סגור</button>
+              </div>
 
-          {activeTab === 'electricity' && elecView === 'home' && (
+              {generalSettingsSaved && <div className="bg-green-50 border border-green-200 text-green-700 text-sm rounded-lg p-3 mb-4">✓ הנתונים נשמרו בהצלחה</div>}
+
+              {generalSettingsLoading && !Object.keys(generalSettings).length ? (
+                <div className="p-12 text-center text-sm text-gray-400">טוען...</div>
+              ) : (
+                <div className="space-y-4">
+                  {/* פרטי קשר */}
+                  <div className="bg-white rounded-xl border border-gray-200 p-5">
+                    <h2 className="text-sm font-semibold text-gray-800 mb-4 flex items-center gap-2">
+                      <span className="w-6 h-6 bg-blue-100 rounded-lg flex items-center justify-center text-xs">📧</span>
+                      פרטי קשר
+                    </h2>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600 mb-1">מייל הגזבר</label>
+                      <input
+                        type="email"
+                        value={generalSettings.treasurer_email || ''}
+                        onChange={e => setGeneralSettings(s => ({...s, treasurer_email: e.target.value}))}
+                        className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm"
+                        placeholder="treasurer@municipality.gov.il"
+                        dir="ltr"
+                      />
+                    </div>
+                  </div>
+
+                  {/* תוכנת הנהלת חשבונות */}
+                  <div className="bg-white rounded-xl border border-gray-200 p-5">
+                    <h2 className="text-sm font-semibold text-gray-800 mb-4 flex items-center gap-2">
+                      <span className="w-6 h-6 bg-purple-100 rounded-lg flex items-center justify-center text-xs">💻</span>
+                      תוכנת הנהלת חשבונות
+                    </h2>
+                    <div className="flex flex-wrap gap-3">
+                      {['אוטומציה', 'מטרופוליני', 'ERP'].map(opt => (
+                        <button key={opt}
+                          onClick={() => setGeneralSettings(s => ({...s, accounting_software: opt}))}
+                          className={`px-4 py-2 rounded-lg text-sm border-2 transition-colors ${
+                            generalSettings.accounting_software === opt
+                              ? 'border-blue-500 bg-blue-50 text-blue-700 font-medium'
+                              : 'border-gray-200 text-gray-600 hover:border-gray-300'
+                          }`}>
+                          {opt}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* חשבונות חו"ז */}
+                  <div className="bg-white rounded-xl border border-gray-200 p-5">
+                    <h2 className="text-sm font-semibold text-gray-800 mb-4 flex items-center gap-2">
+                      <span className="w-6 h-6 bg-green-100 rounded-lg flex items-center justify-center text-xs">🏦</span>
+                      חשבונות חו״ז ספקים
+                    </h2>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      {[
+                        { key: 'choz_welfare',     label: 'חו"ז משרד הרווחה',   icon: '🤝', placeholder: '700000000' },
+                        { key: 'choz_bezeq',       label: 'חו"ז בזק',           icon: '📞', placeholder: '600020300' },
+                        { key: 'choz_electricity',  label: 'חו"ז חברת חשמל',     icon: '⚡', placeholder: '700000000' },
+                        { key: 'choz_celcom',      label: 'חו"ז סלקום',          icon: '📱', placeholder: '600000000' },
+                        { key: 'choz_leasing',     label: 'חו"ז ליסינג',         icon: '🚗', placeholder: '600000000' },
+                      ].map(field => (
+                        <div key={field.key}>
+                          <label className="block text-xs font-medium text-gray-600 mb-1">{field.icon} {field.label}</label>
+                          <input
+                            value={generalSettings[field.key] || ''}
+                            onChange={e => setGeneralSettings(s => ({...s, [field.key]: e.target.value}))}
+                            className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm font-mono"
+                            placeholder={field.placeholder}
+                            dir="ltr"
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* כפתור שמירה */}
+                  <div className="flex justify-end">
+                    <button
+                      onClick={saveGeneralSettings}
+                      disabled={generalSettingsLoading}
+                      className="bg-blue-600 text-white rounded-lg px-8 py-2.5 text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors">
+                      {generalSettingsLoading ? 'שומר...' : 'שמור נתונים'}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {!showGeneralSettings && activeTab === 'celcom' && <CelcomDashboard muni={muni} view={celcomView} setView={setCelcomView} />}
+
+          {!showGeneralSettings && activeTab === 'electricity' && elecView === 'home' && (
             <ElectricityDashboard muni={muni} onNewIntake={() => { setElecView('intake'); setElecResult(null); setError(''); }} />
           )}
 
-          {activeTab === 'electricity' && elecView === 'intake' && (
+          {!showGeneralSettings && activeTab === 'electricity' && elecView === 'intake' && (
             <div>
               <h1 className="text-base font-semibold mb-4">קליטת חשבון חשמל</h1>
               {!elecResult ? (
@@ -996,7 +1122,7 @@ export default function App() {
             </div>
           )}
 
-          {activeTab === 'electricity' && elecView === 'indexes' && (() => {
+          {!showGeneralSettings && activeTab === 'electricity' && elecView === 'indexes' && (() => {
             const grouped: Record<string, any[]> = {};
             elecIndexes.filter((idx: any) => !elecIndexSearch || idx.key_value?.includes(elecIndexSearch) || idx.account_code?.includes(elecIndexSearch) || (idx.connection_name||'').includes(elecIndexSearch))
               .forEach((idx: any) => { if (!grouped[idx.key_value]) grouped[idx.key_value] = []; grouped[idx.key_value].push(idx); });
@@ -1082,11 +1208,11 @@ export default function App() {
             );
           })()}
 
-          {activeTab === 'welfare' && welfareView === 'home' && (
+          {!showGeneralSettings && activeTab === 'welfare' && welfareView === 'home' && (
             <WelfareDashboard muni={muni} onNewIntake={() => { setWelfareView('intake'); setWelfareResult(null); }} refreshKey={welfareRefreshKey} />
           )}
 
-          {activeTab === 'welfare' && welfareView === 'intake' && (
+          {!showGeneralSettings && activeTab === 'welfare' && welfareView === 'intake' && (
             <div>
               <h1 className="text-base font-semibold mb-4">קליטת דוח רווחה</h1>
               {!welfareResult ? (
@@ -1191,7 +1317,7 @@ export default function App() {
             </div>
           )}
 
-          {activeTab === 'welfare' && welfareView === 'indexes' && (
+          {!showGeneralSettings && activeTab === 'welfare' && welfareView === 'indexes' && (
             <div>
               <div className="flex justify-between items-center mb-4">
                 <div><h1 className="text-base font-semibold">אינדקס רווחה</h1><p className="text-xs text-gray-500">{muni?.name} · {welfareIndexes.filter(i=>!welfareIndexSearch||i.key_value?.includes(welfareIndexSearch)||i.account_code?.includes(welfareIndexSearch)||(i.connection_name||'').includes(welfareIndexSearch)).length} רשומות</p></div>
@@ -1247,7 +1373,7 @@ export default function App() {
           )}
 
 
-          {activeTab !== 'bezeq' && activeTab !== 'electricity' && activeTab !== 'welfare' && activeTab !== 'celcom' && (
+          {!showGeneralSettings && activeTab !== 'bezeq' && activeTab !== 'electricity' && activeTab !== 'welfare' && activeTab !== 'celcom' && (
             <div className="flex flex-col items-center justify-center h-64 text-center">
               <div className="text-5xl mb-4">{CATEGORIES.find(c=>c.id===activeTab)?.icon}</div>
               <h2 className="text-lg font-semibold text-gray-700 mb-2">{CATEGORIES.find(c=>c.id===activeTab)?.label} – בקרוב</h2>
@@ -1255,7 +1381,7 @@ export default function App() {
             </div>
           )}
 
-          {activeTab === 'bezeq' && bezeqView === 'home' && (
+          {!showGeneralSettings && activeTab === 'bezeq' && bezeqView === 'home' && (
             <div>
               <div className="flex justify-between items-center mb-5">
                 <div><h1 className="text-base font-semibold text-gray-900">בזק – דשבורד</h1><p className="text-xs text-gray-500">{muni?.name}</p></div>
@@ -1293,7 +1419,7 @@ export default function App() {
             </div>
           )}
 
-          {activeTab === 'bezeq' && bezeqView === 'intake' && (
+          {!showGeneralSettings && activeTab === 'bezeq' && bezeqView === 'intake' && (
             <div>
               <div className="flex justify-between mb-4"><h1 className="text-base font-semibold">קליטת חשבון בזק</h1><span className="text-xs text-gray-400">שלב {step}/3</span></div>
               <div className="flex items-center gap-2 mb-6">
@@ -1361,7 +1487,7 @@ export default function App() {
             </div>
           )}
 
-          {activeTab === 'bezeq' && bezeqView === 'settings' && (
+          {!showGeneralSettings && activeTab === 'bezeq' && bezeqView === 'settings' && (
             <div className="max-w-lg">
               <h1 className="text-base font-semibold mb-1">הגדרות בזק</h1>
               <p className="text-xs text-gray-500 mb-6">{muni?.name}</p>
@@ -1374,7 +1500,7 @@ export default function App() {
             </div>
           )}
 
-          {activeTab === 'bezeq' && bezeqView === 'indexes' && (
+          {!showGeneralSettings && activeTab === 'bezeq' && bezeqView === 'indexes' && (
             <div>
               <div className="flex items-center justify-between mb-4">
                 <div><h1 className="text-base font-semibold">אינדקסי בזק</h1><p className="text-xs text-gray-500">{muni?.name} · {indexes.length} רשומות</p></div>

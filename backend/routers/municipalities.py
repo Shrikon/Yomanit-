@@ -38,6 +38,30 @@ async def get_municipality_settings(muni_id: str):
         result["vendor_account"] = "6000203000"
     return result
 
+
+@router.get("/{muni_id}/general-settings")
+async def get_general_settings(muni_id: str):
+    rows = await database.fetch_all(
+        "SELECT key, value FROM municipality_settings WHERE municipality_id = :id AND template_name = 'general'",
+        values={"id": muni_id}
+    )
+    return {r["key"]: r["value"] for r in rows}
+
+
+@router.post("/{muni_id}/general-settings")
+async def save_general_settings(muni_id: str, payload: dict):
+    for key, value in payload.items():
+        if not key or value is None:
+            continue
+        await database.execute(
+            """INSERT INTO municipality_settings (id, municipality_id, template_name, key, value)
+               VALUES (gen_random_uuid(), :muni, 'general', :key, :val)
+               ON CONFLICT (municipality_id, template_name, key)
+               DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()""",
+            values={"muni": muni_id, "key": key, "val": str(value)}
+        )
+    return {"saved": True}
+
 @router.post("/{muni_id}/settings")
 async def save_municipality_setting(muni_id: str, payload: dict):
     template_name = payload.get("template_name", "bezeq")
