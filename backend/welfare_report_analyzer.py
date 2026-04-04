@@ -33,16 +33,21 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 
 # ── Font ──────────────────────────────────────────────────────────────
-_FONT_URL = "https://github.com/notofonts/noto-fonts/raw/main/hinted/ttf/NotoSansHebrew/NotoSansHebrew-Regular.ttf"
-FONT_PATH = Path(tempfile.gettempdir()) / "NotoSansHebrew-Regular.ttf"
+_FONT_ZIP_URL = "https://github.com/notofonts/hebrew/releases/download/NotoSansHebrew-v2.004/NotoSansHebrew-v2.004.zip"
+_FONT_ZIP_ENTRY = "NotoSansHebrew/full/ttf/NotoSansHebrew-Regular.ttf"
+FONT_PATH = Path(tempfile.gettempdir()) / "NotoSansHebrew-Full-Regular.ttf"
 FONT_NAME = "NotoSansHebrew"
 
 
 def _ensure_font():
-    """Download Noto Sans Hebrew to /tmp if not already cached."""
-    if FONT_PATH.exists():
+    """Download Noto Sans Hebrew (full, with digits) to temp dir if not cached."""
+    if FONT_PATH.exists() and FONT_PATH.stat().st_size > 50000:
         return
-    urllib.request.urlretrieve(_FONT_URL, FONT_PATH)
+    import zipfile, io
+    data = urllib.request.urlopen(_FONT_ZIP_URL).read()
+    with zipfile.ZipFile(io.BytesIO(data)) as zf:
+        with zf.open(_FONT_ZIP_ENTRY) as src, open(FONT_PATH, "wb") as dst:
+            dst.write(src.read())
 
 # Header patterns for dynamic column detection (searched in header row)
 _HEADER_MAP = {
