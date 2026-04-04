@@ -147,14 +147,10 @@ def _build_semel_map(wb: openpyxl.Workbook) -> Dict[str, str]:
 
 def parse_excel(path: str) -> ReportData:
     """קרא קובץ Excel של דוח התחשבנות והחזר ReportData."""
-    import logging
-    log = logging.getLogger("welfare_parser")
-    log.setLevel(logging.DEBUG)
-    if not log.handlers:
-        log.addHandler(logging.StreamHandler())
+    _dbg = lambda msg: print(f"[WELFARE] {msg}", flush=True)
 
     wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
-    log.debug(f"[DEBUG] Sheet names: {wb.sheetnames}")
+    _dbg(f"Sheets: {wb.sheetnames}")
 
     # Build semel lookup from sheet 2
     semel_map = _build_semel_map(wb)
@@ -168,15 +164,28 @@ def parse_excel(path: str) -> ReportData:
         raise ValueError(f"גיליון לא נמצא. קיימים: {wb.sheetnames}")
 
     all_rows = list(ws.rows)
-    log.debug(f"[DEBUG] Total rows: {len(all_rows)}")
-    if all_rows:
-        log.debug(f"[DEBUG] Columns in row 0: {len(all_rows[0])}")
+    _dbg(f"Total rows: {len(all_rows)}, cols in row0: {len(all_rows[0]) if all_rows else 0}")
+
+    # Check if data_only=True returned empty values (formula cells without cache)
+    sample_none = sum(1 for r in all_rows[6:min(12, len(all_rows))] for c in r[:8] if c.value is None)
+    _dbg(f"Sample None count (rows 6-11, cols 0-7): {sample_none}")
+
+    if sample_none > 30:
+        _dbg("Too many Nones - retrying with data_only=False")
+        wb.close()
+        wb = openpyxl.load_workbook(path, data_only=False)
+        if "דוח התחשבנות" in wb.sheetnames:
+            ws = wb["דוח התחשבנות"]
+        else:
+            ws = wb["גרסה להדפסה"]
+        all_rows = list(ws.rows)
+        _dbg(f"Retry rows: {len(all_rows)}")
 
     # Metadata (0-indexed positions verified from actual file)
     municipality = _safe_str(_cell(all_rows, 5, 14))
     month = _safe_str(_cell(all_rows, 4, 14))
     funding_pct = _safe_str(_cell(all_rows, 2, 19))
-    log.debug(f"[DEBUG] municipality={municipality!r}, month={month!r}, funding_pct={funding_pct!r}")
+    _dbg(f"municipality={municipality!r}, month={month!r}, funding_pct={funding_pct!r}")
 
     # Resolve month number from Hebrew name
     month_number = MONTHS_HE.get(month, 0)
@@ -199,20 +208,17 @@ def parse_excel(path: str) -> ReportData:
 
     if header_row_idx is None:
         header_row_idx = 8  # fallback
-    log.debug(f"[DEBUG] header_row_idx={header_row_idx}")
+    _dbg(f"header_row_idx={header_row_idx}")
 
     # Dump first 3 data rows for debugging
     for dbg_i in range(header_row_idx + 1, min(header_row_idx + 4, len(all_rows))):
         dbg_row = all_rows[dbg_i]
-        dbg_cols = {
-            'col2(charge)': dbg_row[COL_CHARGE].value if len(dbg_row) > COL_CHARGE else 'N/A',
-            'col4(balance)': dbg_row[COL_BALANCE].value if len(dbg_row) > COL_BALANCE else 'N/A',
-            'col6(expense)': dbg_row[COL_EXPENSE].value if len(dbg_row) > COL_EXPENSE else 'N/A',
-            'col7(budget)': dbg_row[COL_BUDGET].value if len(dbg_row) > COL_BUDGET else 'N/A',
-            'col22(maslul)': dbg_row[COL_MASLUL].value if len(dbg_row) > COL_MASLUL else 'N/A',
-            'col24(name)': dbg_row[COL_NAME].value if len(dbg_row) > COL_NAME else 'N/A',
-        }
-        log.debug(f"[DEBUG] row[{dbg_i}]: {dbg_cols}")
+        _dbg(f"row[{dbg_i}]: col2={dbg_row[COL_CHARGE].value if len(dbg_row) > COL_CHARGE else 'N/A'}, "
+             f"col4={dbg_row[COL_BALANCE].value if len(dbg_row) > COL_BALANCE else 'N/A'}, "
+             f"col6={dbg_row[COL_EXPENSE].value if len(dbg_row) > COL_EXPENSE else 'N/A'}, "
+             f"col7={dbg_row[COL_BUDGET].value if len(dbg_row) > COL_BUDGET else 'N/A'}, "
+             f"col22={dbg_row[COL_MASLUL].value if len(dbg_row) > COL_MASLUL else 'N/A'}, "
+             f"col24={dbg_row[COL_NAME].value if len(dbg_row) > COL_NAME else 'N/A'}")
 
     # Parse data — take only summary rows (col 22 is whitespace or empty)
     seen_names: dict = {}  # name → SectionRow (deduplicate)
@@ -265,10 +271,10 @@ def parse_excel(path: str) -> ReportData:
 
     wb.close()
 
-    log.debug(f"[DEBUG] Parsed {len(seen_names)} sections. Skipped: {skipped_reasons}")
+    _dbg(f"Parsed {len(seen_names)} sections. Skipped: {skipped_reasons}")
     if seen_names:
         first = next(iter(seen_names.values()))
-        log.debug(f"[DEBUG] First section: name={first.name!r}, budget={first.budget_annual}, expense={first.expense_cumulative}")
+        _dbg(f"First: name={first.name!r}, budget={first.budget_annual}, expense={first.expense_cumulative}")
 
     rows = list(seen_names.values())
     total_budget = sum(r.budget_annual for r in rows)
