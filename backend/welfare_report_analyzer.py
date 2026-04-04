@@ -293,9 +293,11 @@ def parse_excel(path: str) -> ReportData:
             continue
 
         budget_raw = _rv(row, c_budget)
-        if budget_raw is None:
-            budget_raw = _rv(row, c_budget_fb)
+        budget_fb = _rv(row, c_budget_fb)
+        # Use fallback when primary is None or 0 but fallback has a real value
         budget = _safe_float(budget_raw)
+        if budget == 0 and _safe_float(budget_fb) != 0:
+            budget = _safe_float(budget_fb)
         expense = _safe_float(_rv(row, c_expense))
         balance = _safe_float(_rv(row, c_balance))
         charge = _safe_float(_rv(row, c_charge))
