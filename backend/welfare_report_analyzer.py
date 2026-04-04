@@ -17,6 +17,9 @@ Usage:
 import re
 import sys
 import datetime
+import tempfile
+import urllib.request
+from pathlib import Path
 from dataclasses import dataclass
 from typing import List, Dict, Optional
 
@@ -29,9 +32,17 @@ from reportlab.pdfgen import canvas
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 
-# ── Constants ─────────────────────────────────────────────────────────
-FONT_PATH = r"C:\Windows\Fonts\arial.ttf"
-FONT_NAME = "Arial"
+# ── Font ──────────────────────────────────────────────────────────────
+_FONT_URL = "https://github.com/notofonts/noto-fonts/raw/main/hinted/ttf/NotoSansHebrew/NotoSansHebrew-Regular.ttf"
+FONT_PATH = Path(tempfile.gettempdir()) / "NotoSansHebrew-Regular.ttf"
+FONT_NAME = "NotoSansHebrew"
+
+
+def _ensure_font():
+    """Download Noto Sans Hebrew to /tmp if not already cached."""
+    if FONT_PATH.exists():
+        return
+    urllib.request.urlretrieve(_FONT_URL, FONT_PATH)
 
 # Sheet 1 ('דוח התחשבנות') column indices (0-based)
 COL_CHARGE = 2     # חיוב בחודש זה
@@ -242,7 +253,8 @@ def parse_excel(path: str) -> ReportData:
 # ── PDF Generation (Canvas-based for reliable Hebrew rendering) ───────
 
 def _register_font():
-    pdfmetrics.registerFont(TTFont(FONT_NAME, FONT_PATH))
+    _ensure_font()
+    pdfmetrics.registerFont(TTFont(FONT_NAME, str(FONT_PATH)))
 
 
 def _fmt_num(val: float) -> str:
