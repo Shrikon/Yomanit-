@@ -173,10 +173,7 @@ def _build_semel_map(wb: openpyxl.Workbook) -> Dict[str, str]:
 
 def parse_excel(path: str) -> ReportData:
     """קרא קובץ Excel של דוח התחשבנות והחזר ReportData."""
-    _dbg = lambda msg: print(f"[WELFARE] {msg}", flush=True)
-
     wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
-    _dbg(f"Sheets: {wb.sheetnames}")
 
     # Build semel lookup from sheet 2
     semel_map = _build_semel_map(wb)
@@ -190,14 +187,10 @@ def parse_excel(path: str) -> ReportData:
         raise ValueError(f"גיליון לא נמצא. קיימים: {wb.sheetnames}")
 
     all_rows = list(ws.rows)
-    _dbg(f"Total rows: {len(all_rows)}, cols in row0: {len(all_rows[0]) if all_rows else 0}")
 
-    # Check if data_only=True returned empty values (formula cells without cache)
+    # If too many None values, retry without data_only (formula cells without cache)
     sample_none = sum(1 for r in all_rows[6:min(12, len(all_rows))] for c in r[:8] if c.value is None)
-    _dbg(f"Sample None count (rows 6-11, cols 0-7): {sample_none}")
-
     if sample_none > 30:
-        _dbg("Too many Nones - retrying with data_only=False")
         wb.close()
         wb = openpyxl.load_workbook(path, data_only=False)
         if "דוח התחשבנות" in wb.sheetnames:
@@ -205,7 +198,6 @@ def parse_excel(path: str) -> ReportData:
         else:
             ws = wb["גרסה להדפסה"]
         all_rows = list(ws.rows)
-        _dbg(f"Retry rows: {len(all_rows)}")
 
     # Metadata — find dynamically by scanning label cells
     def _find_meta(rows, label_text, label_row_hint=None):
@@ -224,7 +216,6 @@ def parse_excel(path: str) -> ReportData:
     municipality = _find_meta(all_rows, "רשות:")
     month = _find_meta(all_rows, "לחודש:")
     funding_pct = _find_meta(all_rows, "מימון מצטבר")
-    _dbg(f"municipality={municipality!r}, month={month!r}, funding_pct={funding_pct!r}")
 
     # Resolve month number from Hebrew name
     month_number = MONTHS_HE.get(month, 0)
@@ -250,7 +241,6 @@ def parse_excel(path: str) -> ReportData:
 
     # Detect columns dynamically from header row
     col = _detect_columns(all_rows[header_row_idx])
-    _dbg(f"header_row_idx={header_row_idx}, detected_cols={col}")
 
     c_charge = col.get("charge")
     c_balance = col.get("balance")
@@ -270,31 +260,20 @@ def parse_excel(path: str) -> ReportData:
             return row[idx].value
         return None
 
-    # Dump first 3 data rows for debugging
-    for dbg_i in range(header_row_idx + 1, min(header_row_idx + 4, len(all_rows))):
-        r = all_rows[dbg_i]
-        _dbg(f"row[{dbg_i}]: charge={_rv(r, c_charge)}, balance={_rv(r, c_balance)}, "
-             f"expense={_rv(r, c_expense)}, budget={_rv(r, c_budget)}, "
-             f"maslul={_rv(r, c_maslul)!r}, name={_rv(r, c_name)!r}")
-
     # Parse data — take only summary rows (maslul is whitespace or empty)
     seen_names: dict = {}  # name → SectionRow (deduplicate)
-    skipped_reasons: dict = {"no_name": 0, "total": 0, "maslul": 0, "all_zero": 0, "short_row": 0}
     for i in range(header_row_idx + 1, len(all_rows)):
         row = all_rows[i]
 
         name = _safe_str(_rv(row, c_name))
         if not name:
-            skipped_reasons["no_name"] += 1
             continue
         if 'סה"כ' in name or "סה''כ" in name:
-            skipped_reasons["total"] += 1
             continue
 
         # Filter: only summary rows (maslul is whitespace or empty)
         maslul = _safe_str(_rv(row, c_maslul))
         if maslul and maslul not in (" ", ""):
-            skipped_reasons["maslul"] += 1
             continue
 
         budget_raw = _rv(row, c_budget)
@@ -308,7 +287,6 @@ def parse_excel(path: str) -> ReportData:
         charge = _safe_float(_rv(row, c_charge))
 
         if budget == 0 and expense == 0 and balance == 0:
-            skipped_reasons["all_zero"] += 1
             continue
 
         utilization = (expense / budget * 100) if budget != 0 else 0.0
@@ -331,11 +309,6 @@ def parse_excel(path: str) -> ReportData:
         )
 
     wb.close()
-
-    _dbg(f"Parsed {len(seen_names)} sections. Skipped: {skipped_reasons}")
-    if seen_names:
-        first = next(iter(seen_names.values()))
-        _dbg(f"First: name={first.name!r}, budget={first.budget_annual}, expense={first.expense_cumulative}")
 
     rows = list(seen_names.values())
     total_budget = sum(r.budget_annual for r in rows)
