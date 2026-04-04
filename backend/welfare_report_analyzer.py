@@ -48,9 +48,11 @@ def _ensure_font():
 COL_CHARGE = 2     # חיוב בחודש זה
 COL_BALANCE = 4    # יתרת הקצבה כספית
 COL_EXPENSE = 6    # הוצאות להתחשבנות מצטברת
-COL_BUDGET = 7     # הקצבה שנתית בשקלים 100%
-COL_MASLUL = 22    # מסלול תשלום (summary rows have ' ')
+COL_BUDGET = 7     # הקצבה שנתית בשקלים 100% (may be None — formula without cache)
+COL_BUDGET_FALLBACK = 15  # חלק המשרד לפי הסיווג — fallback when col7 is None
+COL_MASLUL = 21    # מסלול תשלום (summary rows have ' ')
 COL_NAME = 24      # שם סעיף
+COL_SEMEL = 26     # סמל הסעיף
 
 
 MONTHS_HE = {
@@ -181,9 +183,9 @@ def parse_excel(path: str) -> ReportData:
         all_rows = list(ws.rows)
         _dbg(f"Retry rows: {len(all_rows)}")
 
-    # Metadata (0-indexed positions verified from actual file)
-    municipality = _safe_str(_cell(all_rows, 5, 14))
-    month = _safe_str(_cell(all_rows, 4, 14))
+    # Metadata — try col15 first (current layout), fallback to col14
+    municipality = _safe_str(_cell(all_rows, 5, 15)) or _safe_str(_cell(all_rows, 5, 14))
+    month = _safe_str(_cell(all_rows, 4, 15)) or _safe_str(_cell(all_rows, 4, 14))
     funding_pct = _safe_str(_cell(all_rows, 2, 19))
     _dbg(f"municipality={municipality!r}, month={month!r}, funding_pct={funding_pct!r}")
 
@@ -243,7 +245,10 @@ def parse_excel(path: str) -> ReportData:
             skipped_reasons["maslul"] += 1
             continue
 
-        budget = _safe_float(row[COL_BUDGET].value if len(row) > COL_BUDGET else None)
+        budget_raw = row[COL_BUDGET].value if len(row) > COL_BUDGET else None
+        if budget_raw is None and len(row) > COL_BUDGET_FALLBACK:
+            budget_raw = row[COL_BUDGET_FALLBACK].value
+        budget = _safe_float(budget_raw)
         expense = _safe_float(row[COL_EXPENSE].value if len(row) > COL_EXPENSE else None)
         balance = _safe_float(row[COL_BALANCE].value if len(row) > COL_BALANCE else None)
         charge = _safe_float(row[COL_CHARGE].value if len(row) > COL_CHARGE else None)
@@ -253,7 +258,10 @@ def parse_excel(path: str) -> ReportData:
             continue
 
         utilization = (expense / budget * 100) if budget != 0 else 0.0
-        semel = semel_map.get(name, "")
+        # Semel: prefer col26 directly, fallback to sheet2 map
+        semel = _safe_str(row[COL_SEMEL].value) if len(row) > COL_SEMEL else ""
+        if not semel:
+            semel = semel_map.get(name, "")
         proportional = budget * (month_number / 12) if month_number else 0.0
         diff = expense - proportional
 
