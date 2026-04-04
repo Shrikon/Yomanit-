@@ -574,7 +574,7 @@ function WelfareDashboard({ muni, onNewIntake, refreshKey }: { muni: any, onNewI
 }
 
 export default function App() {
-  const [screen, setScreen] = useState<'login'|'muni'|'module'|'main'>('login');
+  const [screen, setScreen] = useState<'login'|'muni'|'module'|'main'|'settings'>('login');
   const [muni, setMuni] = useState<Municipality | null>(null);
   const [munis, setMunis] = useState<Municipality[]>([]);
   const [activeTab, setActiveTab] = useState('bezeq');
@@ -609,6 +609,8 @@ export default function App() {
   const [indexes, setIndexes] = useState<IndexRow[]>([]);
   const [settings, setSettings] = useState<{vendor_account:string}>({vendor_account:'6000203000'});
   const [settingsSaved, setSettingsSaved] = useState(false);
+  const [treasurerEmail, setTreasurerEmail] = useState('');
+  const [treasurerSaved, setTreasurerSaved] = useState(false);
   const [indexSearch, setIndexSearch] = useState('');
   const [editingIndex, setEditingIndex] = useState<string|null>(null);
   const [editVals, setEditVals] = useState<{account_code:string;connection_name:string}>({account_code:'',connection_name:''});
@@ -656,6 +658,20 @@ export default function App() {
   async function loadSettings() {
     if (!muni) return;
     try { const data = await apiFetch(`/municipalities/${muni.id}/settings`); if (data?.vendor_account) setSettings({vendor_account: data.vendor_account}); } catch { }
+  }
+
+  async function loadMuniSettings() {
+    if (!muni) return;
+    try { const data = await apiFetch(`/municipalities/${muni.id}/settings`); setTreasurerEmail(data?.treasurer_email || ''); } catch { }
+  }
+
+  async function saveTreasurerEmail() {
+    if (!muni) return;
+    setLoading(true);
+    try {
+      await apiFetch(`/municipalities/${muni.id}/settings`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({template_name: 'general', key: 'treasurer_email', value: treasurerEmail}) });
+      setTreasurerSaved(true); setTimeout(() => setTreasurerSaved(false), 3000);
+    } catch { setError('שגיאה בשמירה'); } finally { setLoading(false); }
   }
 
   async function saveSettings() {
@@ -837,7 +853,37 @@ export default function App() {
             </button>
           ))}
         </div>
-        <button onClick={() => setScreen('muni')} className="mt-6 text-xs text-gray-400 hover:text-gray-600">← החלפת רשות</button>
+        <div className="mt-6 flex items-center justify-between">
+          <button onClick={() => setScreen('muni')} className="text-xs text-gray-400 hover:text-gray-600">← החלפת רשות</button>
+          <button onClick={() => { setScreen('settings'); loadMuniSettings(); }} className="text-xs text-gray-400 hover:text-gray-600 flex items-center gap-1">⚙️ הגדרות</button>
+        </div>
+      </div>
+    </div>
+  );
+
+  if (screen === 'settings') return (
+    <div dir="rtl" className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="bg-white rounded-xl border border-gray-200 p-8 w-full max-w-md shadow-sm">
+        <div className="flex items-center gap-3 mb-6">
+          <div className="w-9 h-9 bg-gray-600 rounded-lg flex items-center justify-center">
+            <span className="text-white text-lg">⚙️</span>
+          </div>
+          <div>
+            <div className="font-semibold text-gray-900">הגדרות רשות</div>
+            <div className="text-xs text-gray-500">{muni?.name}</div>
+          </div>
+        </div>
+        {treasurerSaved && <div className="bg-green-50 border border-green-200 text-green-700 text-sm rounded-lg p-3 mb-4">נשמר בהצלחה</div>}
+        {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg p-3 mb-4">{error}</div>}
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">מייל גזבר</label>
+            <input type="email" value={treasurerEmail} onChange={e => setTreasurerEmail(e.target.value)} placeholder="treasurer@example.com" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
+            <p className="text-xs text-gray-400 mt-1">כתובת לשליחת דוחות גזבר אוטומטיים</p>
+          </div>
+          <button onClick={saveTreasurerEmail} disabled={loading} className="bg-blue-600 text-white rounded-lg px-6 py-2 text-sm font-medium disabled:opacity-50 hover:bg-blue-700">{loading ? 'שומר...' : 'שמור'}</button>
+        </div>
+        <button onClick={() => { setScreen('module'); setError(''); }} className="mt-6 text-xs text-gray-400 hover:text-gray-600">← חזרה</button>
       </div>
     </div>
   );
