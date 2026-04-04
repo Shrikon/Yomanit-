@@ -374,13 +374,13 @@ class _PdfWriter:
         self.y -= 25
 
     def draw_heading(self, text: str):
-        self._check_space(22)
-        self.y -= 6
+        self._check_space(50)
+        self.y -= 10
         self.c.setFont(FONT_NAME, 12)
         self.c.setFillColorRGB(*CLR_HEADING)
         self.c.drawRightString(self.page_w - self.margin, self.y, _bidi(text))
         self.c.setFillColorRGB(0, 0, 0)
-        self.y -= 16
+        self.y -= 30
 
     def draw_text(self, text: str, size: int = 9):
         self._check_space(14)
