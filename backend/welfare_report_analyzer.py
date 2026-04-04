@@ -44,15 +44,34 @@ def _ensure_font():
         return
     urllib.request.urlretrieve(_FONT_URL, FONT_PATH)
 
-# Sheet 1 ('דוח התחשבנות') column indices (0-based)
-COL_CHARGE = 2     # חיוב בחודש זה
-COL_BALANCE = 4    # יתרת הקצבה כספית
-COL_EXPENSE = 6    # הוצאות להתחשבנות מצטברת
-COL_BUDGET = 7     # הקצבה שנתית בשקלים 100% (may be None — formula without cache)
-COL_BUDGET_FALLBACK = 15  # חלק המשרד לפי הסיווג — fallback when col7 is None
-COL_MASLUL = 21    # מסלול תשלום (summary rows have ' ')
-COL_NAME = 24      # שם סעיף
-COL_SEMEL = 26     # סמל הסעיף
+# Header patterns for dynamic column detection (searched in header row)
+_HEADER_MAP = {
+    "charge":   ["חיוב בחודש זה"],
+    "balance":  ["יתרת הקצבה כספית"],
+    "expense":  ["הוצאות להתחשבנות מצטברת"],
+    "budget":   ["הקצבה שנתית בשקלים", "הקצבה שנתית"],
+    "budget_fallback": ["חלק המשרד לפי הסיווג"],
+    "maslul":   ["מסלול תשלום"],
+    "name":     ["שם סעיף"],
+    "semel":    ["סמל הסעיף", "סמל סעיף"],
+}
+
+
+def _detect_columns(header_row) -> dict:
+    """Scan header row and return {field_name: col_index} mapping."""
+    cols = {}
+    for i, cell in enumerate(header_row):
+        val = _safe_str(cell.value)
+        if not val:
+            continue
+        for field, patterns in _HEADER_MAP.items():
+            if field in cols:
+                continue
+            for pat in patterns:
+                if pat in val:
+                    cols[field] = i
+                    break
+    return cols
 
 
 MONTHS_HE = {
@@ -183,10 +202,23 @@ def parse_excel(path: str) -> ReportData:
         all_rows = list(ws.rows)
         _dbg(f"Retry rows: {len(all_rows)}")
 
-    # Metadata — try col15 first (current layout), fallback to col14
-    municipality = _safe_str(_cell(all_rows, 5, 15)) or _safe_str(_cell(all_rows, 5, 14))
-    month = _safe_str(_cell(all_rows, 4, 15)) or _safe_str(_cell(all_rows, 4, 14))
-    funding_pct = _safe_str(_cell(all_rows, 2, 19))
+    # Metadata — find dynamically by scanning label cells
+    def _find_meta(rows, label_text, label_row_hint=None):
+        """Find value cell next to a label like 'רשות: ' or 'לחודש: '."""
+        search_rows = [rows[label_row_hint]] if label_row_hint and label_row_hint < len(rows) else rows[:8]
+        for row in search_rows:
+            for i, c in enumerate(row):
+                if c.value and label_text in _safe_str(c.value):
+                    # Value is in the cell(s) to the LEFT (RTL layout)
+                    for j in range(i - 1, -1, -1):
+                        val = _safe_str(row[j].value)
+                        if val:
+                            return val
+        return ""
+
+    municipality = _find_meta(all_rows, "רשות:")
+    month = _find_meta(all_rows, "לחודש:")
+    funding_pct = _find_meta(all_rows, "מימון מצטבר")
     _dbg(f"municipality={municipality!r}, month={month!r}, funding_pct={funding_pct!r}")
 
     # Resolve month number from Hebrew name
@@ -210,28 +242,43 @@ def parse_excel(path: str) -> ReportData:
 
     if header_row_idx is None:
         header_row_idx = 8  # fallback
-    _dbg(f"header_row_idx={header_row_idx}")
+
+    # Detect columns dynamically from header row
+    col = _detect_columns(all_rows[header_row_idx])
+    _dbg(f"header_row_idx={header_row_idx}, detected_cols={col}")
+
+    c_charge = col.get("charge")
+    c_balance = col.get("balance")
+    c_expense = col.get("expense")
+    c_budget = col.get("budget")
+    c_budget_fb = col.get("budget_fallback")
+    c_maslul = col.get("maslul")
+    c_name = col.get("name")
+    c_semel = col.get("semel")
+
+    if c_name is None:
+        raise ValueError(f"Could not find 'שם סעיף' column in header row {header_row_idx}")
+
+    def _rv(row, idx):
+        """Read value from row by column index (None-safe)."""
+        if idx is not None and idx < len(row):
+            return row[idx].value
+        return None
 
     # Dump first 3 data rows for debugging
     for dbg_i in range(header_row_idx + 1, min(header_row_idx + 4, len(all_rows))):
-        dbg_row = all_rows[dbg_i]
-        _dbg(f"row[{dbg_i}]: col2={dbg_row[COL_CHARGE].value if len(dbg_row) > COL_CHARGE else 'N/A'}, "
-             f"col4={dbg_row[COL_BALANCE].value if len(dbg_row) > COL_BALANCE else 'N/A'}, "
-             f"col6={dbg_row[COL_EXPENSE].value if len(dbg_row) > COL_EXPENSE else 'N/A'}, "
-             f"col7={dbg_row[COL_BUDGET].value if len(dbg_row) > COL_BUDGET else 'N/A'}, "
-             f"col22={dbg_row[COL_MASLUL].value if len(dbg_row) > COL_MASLUL else 'N/A'}, "
-             f"col24={dbg_row[COL_NAME].value if len(dbg_row) > COL_NAME else 'N/A'}")
+        r = all_rows[dbg_i]
+        _dbg(f"row[{dbg_i}]: charge={_rv(r, c_charge)}, balance={_rv(r, c_balance)}, "
+             f"expense={_rv(r, c_expense)}, budget={_rv(r, c_budget)}, "
+             f"maslul={_rv(r, c_maslul)!r}, name={_rv(r, c_name)!r}")
 
-    # Parse data — take only summary rows (col 22 is whitespace or empty)
+    # Parse data — take only summary rows (maslul is whitespace or empty)
     seen_names: dict = {}  # name → SectionRow (deduplicate)
     skipped_reasons: dict = {"no_name": 0, "total": 0, "maslul": 0, "all_zero": 0, "short_row": 0}
     for i in range(header_row_idx + 1, len(all_rows)):
         row = all_rows[i]
-        if len(row) <= COL_NAME:
-            skipped_reasons["short_row"] += 1
-            continue
 
-        name = _safe_str(row[COL_NAME].value)
+        name = _safe_str(_rv(row, c_name))
         if not name:
             skipped_reasons["no_name"] += 1
             continue
@@ -239,27 +286,26 @@ def parse_excel(path: str) -> ReportData:
             skipped_reasons["total"] += 1
             continue
 
-        # Filter: only summary rows (col 22 is whitespace or empty)
-        maslul = _safe_str(row[COL_MASLUL].value) if len(row) > COL_MASLUL else ""
+        # Filter: only summary rows (maslul is whitespace or empty)
+        maslul = _safe_str(_rv(row, c_maslul))
         if maslul and maslul not in (" ", ""):
             skipped_reasons["maslul"] += 1
             continue
 
-        budget_raw = row[COL_BUDGET].value if len(row) > COL_BUDGET else None
-        if budget_raw is None and len(row) > COL_BUDGET_FALLBACK:
-            budget_raw = row[COL_BUDGET_FALLBACK].value
+        budget_raw = _rv(row, c_budget)
+        if budget_raw is None:
+            budget_raw = _rv(row, c_budget_fb)
         budget = _safe_float(budget_raw)
-        expense = _safe_float(row[COL_EXPENSE].value if len(row) > COL_EXPENSE else None)
-        balance = _safe_float(row[COL_BALANCE].value if len(row) > COL_BALANCE else None)
-        charge = _safe_float(row[COL_CHARGE].value if len(row) > COL_CHARGE else None)
+        expense = _safe_float(_rv(row, c_expense))
+        balance = _safe_float(_rv(row, c_balance))
+        charge = _safe_float(_rv(row, c_charge))
 
         if budget == 0 and expense == 0 and balance == 0:
             skipped_reasons["all_zero"] += 1
             continue
 
         utilization = (expense / budget * 100) if budget != 0 else 0.0
-        # Semel: prefer col26 directly, fallback to sheet2 map
-        semel = _safe_str(row[COL_SEMEL].value) if len(row) > COL_SEMEL else ""
+        semel = _safe_str(_rv(row, c_semel))
         if not semel:
             semel = semel_map.get(name, "")
         proportional = budget * (month_number / 12) if month_number else 0.0
