@@ -147,7 +147,14 @@ def _build_semel_map(wb: openpyxl.Workbook) -> Dict[str, str]:
 
 def parse_excel(path: str) -> ReportData:
     """קרא קובץ Excel של דוח התחשבנות והחזר ReportData."""
+    import logging
+    log = logging.getLogger("welfare_parser")
+    log.setLevel(logging.DEBUG)
+    if not log.handlers:
+        log.addHandler(logging.StreamHandler())
+
     wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+    log.debug(f"[DEBUG] Sheet names: {wb.sheetnames}")
 
     # Build semel lookup from sheet 2
     semel_map = _build_semel_map(wb)
@@ -161,11 +168,15 @@ def parse_excel(path: str) -> ReportData:
         raise ValueError(f"גיליון לא נמצא. קיימים: {wb.sheetnames}")
 
     all_rows = list(ws.rows)
+    log.debug(f"[DEBUG] Total rows: {len(all_rows)}")
+    if all_rows:
+        log.debug(f"[DEBUG] Columns in row 0: {len(all_rows[0])}")
 
     # Metadata (0-indexed positions verified from actual file)
     municipality = _safe_str(_cell(all_rows, 5, 14))
     month = _safe_str(_cell(all_rows, 4, 14))
     funding_pct = _safe_str(_cell(all_rows, 2, 19))
+    log.debug(f"[DEBUG] municipality={municipality!r}, month={month!r}, funding_pct={funding_pct!r}")
 
     # Resolve month number from Hebrew name
     month_number = MONTHS_HE.get(month, 0)
@@ -188,23 +199,42 @@ def parse_excel(path: str) -> ReportData:
 
     if header_row_idx is None:
         header_row_idx = 8  # fallback
+    log.debug(f"[DEBUG] header_row_idx={header_row_idx}")
+
+    # Dump first 3 data rows for debugging
+    for dbg_i in range(header_row_idx + 1, min(header_row_idx + 4, len(all_rows))):
+        dbg_row = all_rows[dbg_i]
+        dbg_cols = {
+            'col2(charge)': dbg_row[COL_CHARGE].value if len(dbg_row) > COL_CHARGE else 'N/A',
+            'col4(balance)': dbg_row[COL_BALANCE].value if len(dbg_row) > COL_BALANCE else 'N/A',
+            'col6(expense)': dbg_row[COL_EXPENSE].value if len(dbg_row) > COL_EXPENSE else 'N/A',
+            'col7(budget)': dbg_row[COL_BUDGET].value if len(dbg_row) > COL_BUDGET else 'N/A',
+            'col22(maslul)': dbg_row[COL_MASLUL].value if len(dbg_row) > COL_MASLUL else 'N/A',
+            'col24(name)': dbg_row[COL_NAME].value if len(dbg_row) > COL_NAME else 'N/A',
+        }
+        log.debug(f"[DEBUG] row[{dbg_i}]: {dbg_cols}")
 
     # Parse data — take only summary rows (col 22 is whitespace or empty)
     seen_names: dict = {}  # name → SectionRow (deduplicate)
+    skipped_reasons: dict = {"no_name": 0, "total": 0, "maslul": 0, "all_zero": 0, "short_row": 0}
     for i in range(header_row_idx + 1, len(all_rows)):
         row = all_rows[i]
         if len(row) <= COL_NAME:
+            skipped_reasons["short_row"] += 1
             continue
 
         name = _safe_str(row[COL_NAME].value)
         if not name:
+            skipped_reasons["no_name"] += 1
             continue
         if 'סה"כ' in name or "סה''כ" in name:
+            skipped_reasons["total"] += 1
             continue
 
         # Filter: only summary rows (col 22 is whitespace or empty)
         maslul = _safe_str(row[COL_MASLUL].value) if len(row) > COL_MASLUL else ""
         if maslul and maslul not in (" ", ""):
+            skipped_reasons["maslul"] += 1
             continue
 
         budget = _safe_float(row[COL_BUDGET].value if len(row) > COL_BUDGET else None)
@@ -213,6 +243,7 @@ def parse_excel(path: str) -> ReportData:
         charge = _safe_float(row[COL_CHARGE].value if len(row) > COL_CHARGE else None)
 
         if budget == 0 and expense == 0 and balance == 0:
+            skipped_reasons["all_zero"] += 1
             continue
 
         utilization = (expense / budget * 100) if budget != 0 else 0.0
@@ -233,6 +264,11 @@ def parse_excel(path: str) -> ReportData:
         )
 
     wb.close()
+
+    log.debug(f"[DEBUG] Parsed {len(seen_names)} sections. Skipped: {skipped_reasons}")
+    if seen_names:
+        first = next(iter(seen_names.values()))
+        log.debug(f"[DEBUG] First section: name={first.name!r}, budget={first.budget_annual}, expense={first.expense_cumulative}")
 
     rows = list(seen_names.values())
     total_budget = sum(r.budget_annual for r in rows)
