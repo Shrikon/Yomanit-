@@ -485,6 +485,26 @@ function WelfareDashboard({ muni, onNewIntake, refreshKey }: { muni: any, onNewI
     catch (err: unknown) { alert(err instanceof Error ? err.message : 'שגיאה'); }
   };
 
+  const treasurerFileRef = React.useRef<HTMLInputElement>(null);
+
+  const handleTreasurerReport = async (file: File) => {
+    const form = new FormData();
+    form.append('file', file);
+    try {
+      const res = await fetch(`${API}/upload/welfare/treasurer-report`, { method: 'POST', body: form });
+      if (!res.ok) { const t = await res.text(); alert(t); return; }
+      const blob = await res.blob();
+      const cd = res.headers.get('Content-Disposition') || '';
+      let filename = 'treasurer_report.pdf';
+      const m = cd.match(/filename\*=UTF-8''(.+)/);
+      if (m) filename = decodeURIComponent(m[1]);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = filename; a.click();
+      URL.revokeObjectURL(url);
+    } catch (err: unknown) { alert(err instanceof Error ? err.message : 'שגיאה בהפקת דוח'); }
+  };
+
   return (
     <div>
       <div className="flex justify-between items-center mb-5">
@@ -492,7 +512,11 @@ function WelfareDashboard({ muni, onNewIntake, refreshKey }: { muni: any, onNewI
           <h1 className="text-base font-semibold">רווחה – דשבורד</h1>
           <p className="text-xs text-gray-500">{muni?.name} · {welfareEntries.length} תקופות</p>
         </div>
-        <button onClick={onNewIntake} className="bg-green-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-green-700 font-medium">🤝 + קליטת דוח</button>
+        <div className="flex gap-2">
+          <button onClick={() => treasurerFileRef.current?.click()} className="bg-purple-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-purple-700 font-medium">דוח לגזבר</button>
+          <input ref={treasurerFileRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) handleTreasurerReport(f); e.target.value = ''; }} />
+          <button onClick={onNewIntake} className="bg-green-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-green-700 font-medium">+ קליטת דוח</button>
+        </div>
       </div>
       {loading ? <div className="p-12 text-center text-sm text-gray-400">טוען...</div> : (<>
       {welfareEntries.length > 0 && (

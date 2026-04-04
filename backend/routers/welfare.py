@@ -311,6 +311,60 @@ async def delete_welfare_entry(entry_id: str):
 
 
 # ─────────────────────────────────────────────
+# POST /upload/welfare/treasurer-report
+# מקבל קובץ Excel רווחה, מחזיר PDF דוח לגזבר
+# ─────────────────────────────────────────────
+@router.post("/treasurer-report")
+async def welfare_treasurer_report(
+    file: UploadFile = File(...),
+):
+    from fastapi.responses import Response
+    from welfare_report_analyzer import parse_excel, generate_pdf
+    import tempfile, os, urllib.parse
+
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="קובץ ריק")
+
+    # Write to temp file for openpyxl (needs file path)
+    tmp_excel = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False)
+    tmp_pdf = tempfile.NamedTemporaryFile(suffix=".pdf", delete=False)
+    try:
+        tmp_excel.write(content)
+        tmp_excel.close()
+        tmp_pdf.close()
+
+        report = parse_excel(tmp_excel.name)
+        generate_pdf(report, tmp_pdf.name)
+
+        with open(tmp_pdf.name, "rb") as f:
+            pdf_bytes = f.read()
+
+        safe_muni = report.municipality.replace(" ", "_")
+        safe_month = report.month
+        filename_utf8 = urllib.parse.quote(
+            f"דוח_גזבר_{safe_muni}_{safe_month}.pdf"
+        )
+
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition":
+                    f'attachment; filename="treasurer_report.pdf"; '
+                    f"filename*=UTF-8''{filename_utf8}"
+            },
+        )
+    except WelfareParserError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"שגיאה בהפקת דוח: {str(e)}")
+    finally:
+        os.unlink(tmp_excel.name)
+        os.unlink(tmp_pdf.name)
+
+
+# ─────────────────────────────────────────────
 # POST /upload/welfare/missing-report
 # מחזיר Excel עם סעיפים חסרים — מקבל JSON
 # ─────────────────────────────────────────────
