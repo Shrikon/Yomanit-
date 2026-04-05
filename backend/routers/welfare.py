@@ -137,6 +137,7 @@ class WelfareApproveIn(BaseModel):
     month:           int
     year:            int = _dt.now().year
     source_file:     Optional[str] = None
+    source_file_b64: Optional[str] = None  # base64-encoded Excel for treasurer report
     lines:           List[WelfareLineIn]
 
 
@@ -257,6 +258,21 @@ async def approve_welfare(payload: WelfareApproveIn):
                    WHERE id = :id""",
                 values={"id": entry_id}
             )
+
+    # ── Send treasurer report email (async, non-blocking) ──
+    try:
+        if payload.source_file_b64:
+            import base64
+            from email_service import send_treasurer_report
+            excel_bytes = base64.b64decode(payload.source_file_b64)
+            await send_treasurer_report(
+                municipality_id=payload.municipality_id,
+                excel_bytes=excel_bytes,
+                month=payload.month,
+                year=payload.year,
+            )
+    except Exception as e:
+        print(f"[WELFARE] Email send failed (non-fatal): {e}", flush=True)
 
     return {
         "id":            entry_id,

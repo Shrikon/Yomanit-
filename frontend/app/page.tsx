@@ -597,6 +597,7 @@ export default function App() {
   const [welfareEditId, setWelfareEditId] = useState<string|null>(null);
   const [welfareEditVals, setWelfareEditVals] = useState({ debit: '', credit: '', name: '' });
   const [welfareResult, setWelfareResult] = useState<any>(null);
+  const [welfareFileB64, setWelfareFileB64] = useState<string>('');
   const [welfareLoading, setWelfareLoading] = useState(false);
   const [welfareRefreshKey, setWelfareRefreshKey] = useState(0);
   const [entries, setEntries] = useState<JournalEntry[]>([]);
@@ -1121,6 +1122,9 @@ export default function App() {
                         setWelfareLoading(true); setError('');
                         try {
                           const fd = new FormData(); fd.append('file', file); fd.append('municipality_id', muni.id);
+                          // Store file as base64 for treasurer report
+                          const buf = await file.arrayBuffer();
+                          setWelfareFileB64(btoa(String.fromCharCode(...new Uint8Array(buf))));
                           const res = await fetch(`${API}/upload/welfare`, { method: 'POST', body: fd });
                           const data = await res.json();
                           if (!res.ok) throw new Error(data.detail || 'שגיאה');
@@ -1197,9 +1201,9 @@ export default function App() {
                         setWelfareLoading(true); setError('');
                         try {
                           const lines = welfareResult.rows.filter((r:any) => r.amount > 0).map((r:any) => ({ semel: r.semel, account: r.account, amount: r.amount, side: r.side, description: r.description }));
-                          const res = await apiFetch('/upload/welfare/approve', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ municipality_id: muni.id, period: `${welfareResult.year || new Date().getFullYear()}-${String(welfareResult.month).padStart(2,'0')}`, month: welfareResult.month, year: welfareResult.year || new Date().getFullYear(), source_file: welfareResult.filename, lines }) });
+                          const res = await apiFetch('/upload/welfare/approve', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ municipality_id: muni.id, period: `${welfareResult.year || new Date().getFullYear()}-${String(welfareResult.month).padStart(2,'0')}`, month: welfareResult.month, year: welfareResult.year || new Date().getFullYear(), source_file: welfareResult.filename, source_file_b64: welfareFileB64 || undefined, lines }) });
                           alert(`פקודה נוצרה! ${res.reference_num}`);
-                          setWelfareResult(null); setWelfareRefreshKey(k => k + 1); setWelfareView('home');
+                          setWelfareResult(null); setWelfareFileB64(''); setWelfareRefreshKey(k => k + 1); setWelfareView('home');
                         } catch (err: unknown) { setError(err instanceof Error ? err.message : 'שגיאה'); }
                         finally { setWelfareLoading(false); }
                       }}
