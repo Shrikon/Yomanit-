@@ -12,27 +12,19 @@ def get_db():
     import db
     return db
 
-# Defaults — overridden by municipality_settings if configured
-DEFAULT_VENDOR   = "300000"
-DEFAULT_VAT      = "120000"
-DEFAULT_DEVICES  = "120000"
-DEFAULT_BUDGET   = "9999"
+DEFAULT_VENDOR = "300000"
+DEFAULT_BUDGET = "9999"
 UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "..", "uploads", "celcom")
 
 
-async def _load_celcom_accounts(municipality_id: str) -> dict:
-    """Load dynamic account codes from municipality_settings."""
-    rows = await get_db().fetch_all(
-        """SELECT key, value FROM municipality_settings
-           WHERE municipality_id = :muni AND template_name = 'celcom'""",
+async def _get_vendor_account(municipality_id: str) -> str:
+    """Load vendor account from municipality_settings."""
+    row = await get_db().fetch_one(
+        """SELECT value FROM municipality_settings
+           WHERE municipality_id = :muni AND key = 'vendor_cellcom'""",
         values={"muni": municipality_id},
     )
-    settings = {r["key"]: r["value"] for r in rows}
-    return {
-        "vendor":  settings.get("vendor_cellcom", DEFAULT_VENDOR),
-        "vat":     settings.get("vat_account", DEFAULT_VAT),
-        "devices": settings.get("devices_account", DEFAULT_DEVICES),
-    }
+    return row["value"] if row else DEFAULT_VENDOR
 
 
 def normalize_phone(phone) -> str:
@@ -228,9 +220,6 @@ async def preview_celcom(
             "date":   parsed["inv_date"],
             "number": parsed["inv_num"],
             "total":  _fmt(invoice_total),
-            "vat":    _fmt(parsed["H12"]),
-            "exempt": _fmt(parsed["H13"]),
-            "equip":  _fmt(parsed["H14"]),
         },
         "subscribers":     all_subscribers,
         "unmapped":        missing_list,
@@ -315,21 +304,17 @@ async def approve_celcom(
     if existing:
         raise HTTPException(status_code=409, detail=f"קיימת פקודה לתקופה {period}: {existing['reference_num']}")
 
-    # ── Load dynamic accounts from settings ──────────────────────────────
-    accounts = await _load_celcom_accounts(municipality_id)
+    # ── Load vendor account from settings ─────────────────────────────────
+    vendor_account = await _get_vendor_account(municipality_id)
 
-    # ── Compute journal components ────────────────────────────────────────
+    # ── Balance check ─────────────────────────────────────────────────────
     H_TOTAL    = parsed["H_TOTAL"]
-    H12        = parsed["H12"]
-    H13        = parsed.get("H13", Decimal("0"))
-    H14        = parsed.get("H14", Decimal("0"))
     budget_sum = _r2(sum(budget_totals.values()))
-    sum_debits = _r2(H12 + H13 + H14 + budget_sum)
 
-    if abs(sum_debits - H_TOTAL) > Decimal("0.10"):
+    if abs(budget_sum - H_TOTAL) > Decimal("0.10"):
         raise HTTPException(
             status_code=422,
-            detail=f"פקודה לא מאוזנת: חובה={_fmt(sum_debits)} ≠ זכות={_fmt(H_TOTAL)}"
+            detail=f"פקודה לא מאוזנת: חובה={_fmt(budget_sum)} ≠ זכות={_fmt(H_TOTAL)}"
         )
 
     # ── שמירת קובץ ────────────────────────────────────────────────────────
@@ -374,57 +359,12 @@ async def approve_celcom(
                VALUES (:id,:entry,:num,:acct,:desc,0,:credit,NULL)""",
             values={
                 "id": str(uuid4()), "entry": entry_id, "num": line_num,
-                "acct": accounts["vendor"],
+                "acct": vendor_account,
                 "desc": f"חו\"ז סלקום חשבונית {inv_num}",
                 "credit": float(H_TOTAL),
             }
         )
         line_num += 1
-
-        # חובה – מע"מ תשומות
-        if H12 > Decimal("0"):
-            await get_db().execute(
-                """INSERT INTO journal_lines
-                   (id, entry_id, line_num, account, description, debit, credit, budget_section)
-                   VALUES (:id,:entry,:num,:acct,:desc,:debit,0,NULL)""",
-                values={
-                    "id": str(uuid4()), "entry": entry_id, "num": line_num,
-                    "acct": accounts["vat"],
-                    "desc": f"מע\"מ תשומות סלקום {period}",
-                    "debit": float(H12),
-                }
-            )
-            line_num += 1
-
-        # חובה – פטור ממע"מ
-        if H13 > Decimal("0"):
-            await get_db().execute(
-                """INSERT INTO journal_lines
-                   (id, entry_id, line_num, account, description, debit, credit, budget_section)
-                   VALUES (:id,:entry,:num,:acct,:desc,:debit,0,NULL)""",
-                values={
-                    "id": str(uuid4()), "entry": entry_id, "num": line_num,
-                    "acct": accounts["vat"],
-                    "desc": f"פטור ממע\"מ סלקום {period}",
-                    "debit": float(H13),
-                }
-            )
-            line_num += 1
-
-        # חובה – תשלומי מכשירים
-        if H14 > Decimal("0"):
-            await get_db().execute(
-                """INSERT INTO journal_lines
-                   (id, entry_id, line_num, account, description, debit, credit, budget_section)
-                   VALUES (:id,:entry,:num,:acct,:desc,:debit,0,NULL)""",
-                values={
-                    "id": str(uuid4()), "entry": entry_id, "num": line_num,
-                    "acct": accounts["devices"],
-                    "desc": f"תשלומי מכשירים סלקום {period}",
-                    "debit": float(H14),
-                }
-            )
-            line_num += 1
 
         # חובות לפי סעיף תקציבי – ממוינים
         for budget, amount in sorted(budget_totals.items()):
