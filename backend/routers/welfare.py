@@ -241,8 +241,25 @@ async def approve_welfare(payload: WelfareApproveIn):
                 }
             )
 
-        # רווחה: אין שורת איזון — חו"ז כבר קיים בתוך payload.lines מהדוח
-        # כלל זהב: approve אינו מאזן — הוא רק מאשר
+        # שורת איזון — חו"ז משרד הרווחה (זכות)
+        if diff != 0:
+            line_num = len(payload.lines) + 1
+            await database.execute(
+                """INSERT INTO journal_lines
+                   (id,entry_id,line_num,account,description,debit,credit,reference,key_value)
+                   VALUES (:id,:entry,:num,:acct,:desc,:debit,:credit,:ref,:key)""",
+                values={
+                    "id":     str(uuid4()),
+                    "entry":  entry_id,
+                    "num":    line_num,
+                    "acct":   ministry_account,
+                    "desc":   f"חו\"ז משרד הרווחה {period_str}",
+                    "debit":  float(abs(diff)) if diff < 0 else 0.0,
+                    "credit": float(abs(diff)) if diff > 0 else 0.0,
+                    "ref":    "חוז",
+                    "key":    "חוז",
+                }
+            )
 
         # בדוק אם כל השורות יש להן חשבון — אם כן, קבע אוטומטית כ-approved
         all_lines_have_account = all(
