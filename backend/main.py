@@ -21,7 +21,7 @@ logging.basicConfig(level=logging.DEBUG)
 from fastapi import Request
 from fastapi.responses import JSONResponse
 app = FastAPI(
-    title="יומנית API",
+    title="יומנית API",  # v2
     description="מערכת ניהול פקודות יומן לרשויות מקומיות",
     version="0.1.0",
     lifespan=lifespan,
