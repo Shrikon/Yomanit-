@@ -33,25 +33,37 @@ CHESHBONIT_NAME = "CHESHBONIT"
 # ── Helpers ───────────────────────────────────────────────────────────
 
 def _file_tag(filename: str) -> str:
-    """Extract tag from filename (e.g. 'GY_2026.csv' → 'GY')."""
+    """Extract tag from filename (e.g. '10426609_10_2025AZAROLIM.csv' → 'AZAROLIM')."""
     stem = Path(filename).stem.upper()
+    # Check suffix first (common pattern: 10426609_10_2025AZAROLIM)
     for tag in sorted(ALLOWED_FILES | BLOCKED_FILES | {CHESHBONIT_NAME}, key=len, reverse=True):
-        if stem.startswith(tag):
+        if stem.endswith(tag) or stem.startswith(tag):
             return tag
+        # Handle GY003, GY019 etc. → GY
+        if tag == "GY" and ("GY0" in stem or "GY1" in stem or "GY2" in stem):
+            return tag
+    # Handle ICHLUSKITOT → ICHLUS
+    if "ICHLUS" in stem:
+        return "ICHLUS"
     return stem
 
 
 def _read_csv(path: Path) -> list[dict]:
-    """Read a windows-1255 CSV, strip BOM, return list of row dicts."""
+    """Read a CSV file, auto-detecting encoding (UTF-8-BOM or windows-1255)."""
     raw = path.read_bytes()
-    if raw[:3] == b"\xef\xbb\xbf":
-        raw = raw[3:]
+    # Try UTF-8 first (with or without BOM)
+    try:
+        text = raw.decode("utf-8-sig")
+        # Quick sanity: Hebrew chars should be present
+        if any("\u0590" <= c <= "\u05FF" for c in text[:200]):
+            lines = text.splitlines()
+            return list(csv.DictReader(lines)) if lines else []
+    except UnicodeDecodeError:
+        pass
+    # Fallback to windows-1255
     text = raw.decode("windows-1255", errors="replace")
     lines = text.splitlines()
-    if not lines:
-        return []
-    reader = csv.DictReader(lines)
-    return list(reader)
+    return list(csv.DictReader(lines)) if lines else []
 
 
 def _safe_float(val) -> float:
