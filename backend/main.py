@@ -7,6 +7,12 @@ import db
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await db.connect()
+    # Verify critical dependencies at startup
+    try:
+        import xlrd
+        print(f"[STARTUP] xlrd={xlrd.__version__}", flush=True)
+    except ImportError as e:
+        print(f"[STARTUP] WARNING: xlrd not installed: {e}", flush=True)
     yield
     await db.disconnect()
 # backwards compat
