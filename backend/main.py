@@ -31,7 +31,16 @@ async def global_exception_handler(request: Request, exc: Exception):
     import traceback
     tb = traceback.format_exc()
     logging.error(f"UNHANDLED ERROR: {tb}")
-    return JSONResponse(status_code=500, content={"detail": str(exc), "traceback": tb[-1000:]})
+    origin = request.headers.get("origin", "*")
+    return JSONResponse(
+        status_code=500,
+        content={"detail": str(exc), "traceback": tb[-1000:]},
+        headers={
+            "Access-Control-Allow-Origin": origin,
+            "Access-Control-Allow-Methods": "*",
+            "Access-Control-Allow-Headers": "*",
+        },
+    )
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
