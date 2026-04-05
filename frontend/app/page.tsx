@@ -611,6 +611,7 @@ export default function App() {
   const [settings, setSettings] = useState<{vendor_account:string}>({vendor_account:'6000203000'});
   const [settingsSaved, setSettingsSaved] = useState(false);
   const [treasurerEmail, setTreasurerEmail] = useState('');
+  const [ministryAccount, setMinistryAccount] = useState('');
   const [treasurerSaved, setTreasurerSaved] = useState(false);
   const [indexSearch, setIndexSearch] = useState('');
   const [editingIndex, setEditingIndex] = useState<string|null>(null);
@@ -663,14 +664,21 @@ export default function App() {
 
   async function loadMuniSettings() {
     if (!muni) return;
-    try { const data = await apiFetch(`/municipalities/${muni.id}/settings`); setTreasurerEmail(data?.treasurer_email || ''); } catch { }
+    try {
+      const data = await apiFetch(`/municipalities/${muni.id}/settings`);
+      setTreasurerEmail(data?.treasurer_email || '');
+      setMinistryAccount(data?.ministry_account || '');
+    } catch { }
   }
 
-  async function saveTreasurerEmail() {
+  async function saveMuniSettings() {
     if (!muni) return;
     setLoading(true);
     try {
       await apiFetch(`/municipalities/${muni.id}/settings`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({template_name: 'general', key: 'treasurer_email', value: treasurerEmail}) });
+      if (ministryAccount) {
+        await apiFetch(`/municipalities/${muni.id}/settings`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({template_name: 'welfare', key: 'ministry_account', value: ministryAccount}) });
+      }
       setTreasurerSaved(true); setTimeout(() => setTreasurerSaved(false), 3000);
     } catch { setError('שגיאה בשמירה'); } finally { setLoading(false); }
   }
@@ -882,7 +890,12 @@ export default function App() {
             <input type="email" value={treasurerEmail} onChange={e => setTreasurerEmail(e.target.value)} placeholder="treasurer@example.com" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
             <p className="text-xs text-gray-400 mt-1">כתובת לשליחת דוחות גזבר אוטומטיים</p>
           </div>
-          <button onClick={saveTreasurerEmail} disabled={loading} className="bg-blue-600 text-white rounded-lg px-6 py-2 text-sm font-medium disabled:opacity-50 hover:bg-blue-700">{loading ? 'שומר...' : 'שמור'}</button>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">חו"ז משרד הרווחה</label>
+            <input value={ministryAccount} onChange={e => setMinistryAccount(e.target.value)} placeholder="7000034000" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm font-mono" />
+            <p className="text-xs text-gray-400 mt-1">חשבון חו"ז לשורת איזון בפקודת רווחה</p>
+          </div>
+          <button onClick={saveMuniSettings} disabled={loading} className="bg-blue-600 text-white rounded-lg px-6 py-2 text-sm font-medium disabled:opacity-50 hover:bg-blue-700">{loading ? 'שומר...' : 'שמור'}</button>
         </div>
         <button onClick={() => { setScreen('module'); setError(''); }} className="mt-6 text-xs text-gray-400 hover:text-gray-600">← חזרה</button>
       </div>
