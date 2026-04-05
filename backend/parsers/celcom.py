@@ -21,13 +21,11 @@ class CelcomParserError(Exception):
 
 BALANCE_TOL = Decimal("0.10")
 
-COL_PHONE = 3
-COL_NAME  = 4
-COL_SNAME = 5
-COL_CE    = 82  # סה"כ לפני מע"מ
-COL_CF    = 83  # סה"כ פטור מע"מ
-COL_CG    = 84  # סה"כ חיובים/זיכויים כוללי מע"מ
-VAT_RATE  = Decimal("1.18")
+COL_PHONE     = 3
+COL_NAME      = 4
+COL_SNAME     = 5
+COL_COMPANY   = 28  # השתתפות חברה כולל מע"מ
+COL_TOTAL_ROW = 85  # סה"כ חשבונית כולל מע"מ (fallback)
 
 
 def normalize_phone(phone: Any) -> str:
@@ -125,6 +123,8 @@ def parse_celcom(content: bytes) -> dict:
 
         phone_raw = row.iloc[COL_PHONE] if COL_PHONE < len(row) else None
         phone = normalize_phone(phone_raw)
+        if not phone:
+            continue  # skip adjustment/summary rows without phone
 
         name_f = str(row.iloc[COL_NAME] if COL_NAME < len(row) else "").strip()
         name_l = str(row.iloc[COL_SNAME] if COL_SNAME < len(row) else "").strip()
@@ -133,17 +133,17 @@ def parse_celcom(content: bytes) -> dict:
             name_l = name_l.replace(bad, "").strip()
         name = f"{name_f} {name_l}".strip()
 
-        ce = _to_dec(row.iloc[COL_CE] if COL_CE < len(row) else None)
-        cf = _to_dec(row.iloc[COL_CF] if COL_CF < len(row) else None)
-        cg = _to_dec(row.iloc[COL_CG] if COL_CG < len(row) else None)
-        amount = _r2(ce * VAT_RATE + cf + cg)
+        # col28 (השתתפות חברה) is the primary amount; fallback to col85 if col28=0
+        company = _to_dec(row.iloc[COL_COMPANY] if COL_COMPANY < len(row) else None)
+        total_row = _to_dec(row.iloc[COL_TOTAL_ROW] if COL_TOTAL_ROW < len(row) else None)
+        amount = company if company != Decimal("0") else total_row
         if amount == Decimal("0"):
             continue
 
         rows.append({
-            "phone":  phone,  # empty for adjustment rows
-            "name":   name or "שורת התאמה",
-            "amount": amount,
+            "phone":  phone,
+            "name":   name,
+            "amount": _r2(amount),
         })
 
     sum_rows = _r2(sum(r["amount"] for r in rows))
