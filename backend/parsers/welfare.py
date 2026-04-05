@@ -382,22 +382,21 @@ def apply_welfare_splits(parsed: dict):
     matched = []
     missing = []
 
-    # --- מעבר 1: שורות 184xxx (govt = תשלומי ממשלה בלבד) ---
-    # סעיף חסר מאינדקס → נכנס עם חשבון ריק (account="")
+    # --- מעבר 1: שורות הוצאה/184 (govt = תשלומי ממשלה בלבד) ---
+    # credit_account = חשבון 184xxx (הוצאה), side=debit (ח/ז 1)
     for row in parsed["rows"]:
         govt = row["govt_amount"]
         if govt == Decimal('0'):
             continue
         if not row["in_index"]:
             missing.append({**row, "error": f"סעיף {row['semel']} לא נמצא ב-INDEX"})
-        # נכנס לפקודה בכל מקרה — חשבון ריק אם חסר באינדקס
-        debit_acc  = row.get("debit_account",  "")
-        credit_acc = row.get("credit_account", "")
+        acct_184 = row.get("credit_account", "")  # 184 = credit in DB index
+        acct_134 = row.get("debit_account",  "")  # 134 = debit in DB index
         if govt > Decimal('0'):
             matched.append({
                 "semel": row["semel"] if row["in_index"] else "",
                 "name": row["name"],
-                "account": debit_acc,
+                "account": acct_184,
                 "amount": float(govt),
                 "side": "debit",
                 "description": f"רווחה {row['semel']} {row['name']}",
@@ -406,25 +405,25 @@ def apply_welfare_splits(parsed: dict):
             matched.append({
                 "semel": row["semel"] if row["in_index"] else "",
                 "name": row["name"],
-                "account": credit_acc,
+                "account": acct_134,
                 "amount": float(abs(govt)),
                 "side": "credit",
                 "description": f"רווחה {row['semel']} {row['name']}",
             })
 
-    # --- מעבר 2: שורות 134xxx (source = K: שורות סיכום + ילדי חוץ + הפרשים) ---
-    # סעיף חסר מאינדקס → נכנס עם חשבון ריק (account="")
+    # --- מעבר 2: שורות הכנסה/134 (source = סיכום + ילדי חוץ + הפרשים) ---
+    # debit_account = חשבון 134xxx (הכנסה), side=credit (ח/ז 2)
     for row in parsed["rows"]:
         source = row["source_amount"]
         if source == Decimal('0'):
             continue
-        debit_acc  = row.get("debit_account",  "")
-        credit_acc = row.get("credit_account", "")
+        acct_184 = row.get("credit_account", "")
+        acct_134 = row.get("debit_account",  "")
         if source > Decimal('0'):
             matched.append({
                 "semel": row["semel"] if row["in_index"] else "",
                 "name": row["name"],
-                "account": credit_acc,
+                "account": acct_134,
                 "amount": float(source),
                 "side": "credit",
                 "description": f"רווחה {row['semel']} {row['name']}",
@@ -433,7 +432,7 @@ def apply_welfare_splits(parsed: dict):
             matched.append({
                 "semel": row["semel"] if row["in_index"] else "",
                 "name": row["name"],
-                "account": debit_acc,
+                "account": acct_184,
                 "amount": float(abs(source)),
                 "side": "debit",
                 "description": f"רווחה {row['semel']} {row['name']}",
