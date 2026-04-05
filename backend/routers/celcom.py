@@ -302,7 +302,10 @@ async def approve_celcom(
     # ── אימות: חובה = זכות לפני כתיבה ────────────────────────────────────
     H_TOTAL    = parsed["H_TOTAL"]
     H12        = parsed["H12"]
-    sum_debits = _r2(H12 + sum(budget_totals.values()))
+    H13        = parsed.get("H13", Decimal("0"))
+    H14        = parsed.get("H14", Decimal("0"))
+    budget_sum = _r2(sum(budget_totals.values()))
+    sum_debits = _r2(H12 + H13 + H14 + budget_sum)
 
     if abs(sum_debits - H_TOTAL) > Decimal("0.10"):
         raise HTTPException(
@@ -368,6 +371,36 @@ async def approve_celcom(
                     "acct": VAT_INPUT,
                     "desc": f"מע\"מ תשומות סלקום {period}",
                     "debit": float(H12),
+                }
+            )
+            line_num += 1
+
+        # חובה – פטור ממע"מ
+        if H13 > Decimal("0"):
+            await get_db().execute(
+                """INSERT INTO journal_lines
+                   (id, entry_id, line_num, account, description, debit, credit, budget_section)
+                   VALUES (:id,:entry,:num,:acct,:desc,:debit,0,NULL)""",
+                values={
+                    "id": str(uuid4()), "entry": entry_id, "num": line_num,
+                    "acct": VAT_INPUT,
+                    "desc": f"פטור ממע\"מ סלקום {period}",
+                    "debit": float(H13),
+                }
+            )
+            line_num += 1
+
+        # חובה – תשלומי מכשיר
+        if H14 > Decimal("0"):
+            await get_db().execute(
+                """INSERT INTO journal_lines
+                   (id, entry_id, line_num, account, description, debit, credit, budget_section)
+                   VALUES (:id,:entry,:num,:acct,:desc,:debit,0,NULL)""",
+                values={
+                    "id": str(uuid4()), "entry": entry_id, "num": line_num,
+                    "acct": VAT_INPUT,
+                    "desc": f"תשלומי מכשיר סלקום {period}",
+                    "debit": float(H14),
                 }
             )
             line_num += 1
