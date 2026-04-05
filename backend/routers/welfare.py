@@ -82,21 +82,20 @@ async def upload_welfare(
             "status":      "ok",
         })
     for r in missing:
+        amt = float(r.get("chiuv_hodesh", 0) or r.get("mishrad", 0))
         rows_out.append({
             "semel":       r["semel"],
             "name":        r["name"],
             "account":     "",
-            "amount":      float(r.get("chiuv_hodesh", 0) or r.get("mishrad", 0)),
-            "side":        "unknown",
+            "amount":      amt,
+            "side":        "debit" if amt >= 0 else "credit",
             "description": r["name"],
             "status":      "missing_index",
             "error":       r.get("error", ""),
         })
 
-    # חסרים עם ₪0 לא חוסמים אישור
-    # חסרים חוסמים רק אם יש להם סכום > 0
-    blocking_missing = [r for r in missing if float(r.get('amount', 0) or 0) > 0]
-    can_approve = len(blocking_missing) == 0
+    # Missing index entries no longer block approval
+    can_approve = True
 
     return {
         "filename":      file.filename,
@@ -258,6 +257,36 @@ async def approve_welfare(payload: WelfareApproveIn):
                    WHERE id = :id""",
                 values={"id": entry_id}
             )
+
+    # ── Auto-insert missing semels into indexes table ──
+    try:
+        missing_semels = [
+            line for line in payload.lines
+            if not (line.account or '').strip()
+        ]
+        if missing_semels:
+            from index_cache import invalidate
+            for line in missing_semels:
+                # Insert debit placeholder
+                await database.execute(
+                    """INSERT INTO indexes (id, municipality_id, template_id, key_value, account_code, description, active)
+                       VALUES (:id, :muni, :tmpl, :key, '', 'debit', TRUE)
+                       ON CONFLICT (municipality_id, template_id, key_value, description)
+                       DO NOTHING""",
+                    values={"id": str(uuid4()), "muni": payload.municipality_id, "tmpl": template_id, "key": line.semel}
+                )
+                # Insert credit placeholder
+                await database.execute(
+                    """INSERT INTO indexes (id, municipality_id, template_id, key_value, account_code, description, active)
+                       VALUES (:id, :muni, :tmpl, :key, '', 'credit', TRUE)
+                       ON CONFLICT (municipality_id, template_id, key_value, description)
+                       DO NOTHING""",
+                    values={"id": str(uuid4()), "muni": payload.municipality_id, "tmpl": template_id, "key": line.semel}
+                )
+            invalidate(payload.municipality_id, template_id)
+            print(f"[WELFARE] Auto-inserted {len(missing_semels)} missing semels into indexes", flush=True)
+    except Exception as e:
+        print(f"[WELFARE] Auto-insert index failed (non-fatal): {e}", flush=True)
 
     # ── Send treasurer report email (async, non-blocking) ──
     try:
