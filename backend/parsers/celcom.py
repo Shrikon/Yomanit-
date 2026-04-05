@@ -24,7 +24,10 @@ BALANCE_TOL = Decimal("0.10")
 COL_PHONE = 3
 COL_NAME  = 4
 COL_SNAME = 5
-COL_TOTAL = 85  # סה"כ חשבונית כולל מע"מ
+COL_CE    = 82  # סה"כ לפני מע"מ
+COL_CF    = 83  # סה"כ פטור מע"מ
+COL_CG    = 84  # סה"כ חיובים/זיכויים כוללי מע"מ
+VAT_RATE  = Decimal("1.18")
 
 
 def normalize_phone(phone: Any) -> str:
@@ -130,14 +133,17 @@ def parse_celcom(content: bytes) -> dict:
             name_l = name_l.replace(bad, "").strip()
         name = f"{name_f} {name_l}".strip()
 
-        total = _to_dec(row.iloc[COL_TOTAL] if COL_TOTAL < len(row) else None)
-        if total == Decimal("0"):
+        ce = _to_dec(row.iloc[COL_CE] if COL_CE < len(row) else None)
+        cf = _to_dec(row.iloc[COL_CF] if COL_CF < len(row) else None)
+        cg = _to_dec(row.iloc[COL_CG] if COL_CG < len(row) else None)
+        amount = _r2(ce * VAT_RATE + cf + cg)
+        if amount == Decimal("0"):
             continue
 
         rows.append({
-            "phone":  phone,  # may be empty for adjustment rows
+            "phone":  phone,  # empty for adjustment rows
             "name":   name or "שורת התאמה",
-            "amount": _r2(total),
+            "amount": amount,
         })
 
     sum_rows = _r2(sum(r["amount"] for r in rows))
