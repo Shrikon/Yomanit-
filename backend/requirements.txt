@@ -24,7 +24,7 @@ mdurl==0.1.2
 numpy==2.4.3
 openpyxl==3.1.5
 orjson==3.11.7
-xlrd>=2.0.1
+xlrd==2.0.1
 pandas==3.0.1
 pydantic==2.12.5
 pydantic_core==2.41.5
