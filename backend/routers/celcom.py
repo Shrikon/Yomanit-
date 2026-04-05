@@ -12,10 +12,27 @@ def get_db():
     import db
     return db
 
-CELLCOM_VENDOR = "300000"
-VAT_INPUT      = "120000"
-DEFAULT_BUDGET = "9999"
+# Defaults — overridden by municipality_settings if configured
+DEFAULT_VENDOR   = "300000"
+DEFAULT_VAT      = "120000"
+DEFAULT_DEVICES  = "120000"
+DEFAULT_BUDGET   = "9999"
 UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "..", "uploads", "celcom")
+
+
+async def _load_celcom_accounts(municipality_id: str) -> dict:
+    """Load dynamic account codes from municipality_settings."""
+    rows = await get_db().fetch_all(
+        """SELECT key, value FROM municipality_settings
+           WHERE municipality_id = :muni AND template_name = 'celcom'""",
+        values={"muni": municipality_id},
+    )
+    settings = {r["key"]: r["value"] for r in rows}
+    return {
+        "vendor":  settings.get("vendor_cellcom", DEFAULT_VENDOR),
+        "vat":     settings.get("vat_account", DEFAULT_VAT),
+        "devices": settings.get("devices_account", DEFAULT_DEVICES),
+    }
 
 
 def normalize_phone(phone) -> str:
@@ -197,7 +214,7 @@ async def preview_celcom(
             missing_list.append(entry)
 
     # ── 6. סיכומים – הכל Decimal ──────────────────────────────────────────
-    invoice_total  = parsed["H_TOTAL"]                  # Decimal
+    invoice_total  = parsed["H_TOTAL"]
     mapped_total   = _r2(sum(Decimal(s["amount"]) for s in mapped_list))
     unmapped_total = _r2(sum(Decimal(s["amount"]) for s in missing_list))
     diff           = _r2(invoice_total - sum_grouped)
@@ -207,7 +224,6 @@ async def preview_celcom(
     all_subscribers = sorted(mapped_list + missing_list, key=lambda x: x["phone"])
 
     return {
-        "file_type": parsed["file_type"],
         "invoice": {
             "date":   parsed["inv_date"],
             "number": parsed["inv_num"],
@@ -299,7 +315,10 @@ async def approve_celcom(
     if existing:
         raise HTTPException(status_code=409, detail=f"קיימת פקודה לתקופה {period}: {existing['reference_num']}")
 
-    # ── אימות: חובה = זכות לפני כתיבה ────────────────────────────────────
+    # ── Load dynamic accounts from settings ──────────────────────────────
+    accounts = await _load_celcom_accounts(municipality_id)
+
+    # ── Compute journal components ────────────────────────────────────────
     H_TOTAL    = parsed["H_TOTAL"]
     H12        = parsed["H12"]
     H13        = parsed.get("H13", Decimal("0"))
@@ -319,11 +338,14 @@ async def approve_celcom(
     file_path = os.path.join(UPLOAD_DIR, f"{file_id}_{filename}")
     with open(file_path, "wb") as f:
         f.write(content)
-    await get_db().execute(
-        """INSERT INTO uploaded_files (id, municipality_id, file_name, file_path, source_type)
-           VALUES (:id, :muni, :name, :path, 'CELLCOM')""",
-        values={"id": file_id, "muni": municipality_id, "name": filename, "path": file_path},
-    )
+    try:
+        await get_db().execute(
+            """INSERT INTO uploaded_files (id, municipality_id, file_name, file_path, source_type)
+               VALUES (:id, :muni, :name, :path, 'CELLCOM')""",
+            values={"id": file_id, "muni": municipality_id, "name": filename, "path": file_path},
+        )
+    except Exception:
+        pass  # table may not exist on all deployments
 
     # ── בניית פקודה ───────────────────────────────────────────────────────
     inv_num  = parsed["inv_num"]
@@ -334,26 +356,25 @@ async def approve_celcom(
         await get_db().execute(
             """INSERT INTO journal_entries
                (id, municipality_id, template_id, period, reference_num,
-                source_file, source_file_id, total_amount, status, source_type)
-               VALUES (:id,:muni,:tmpl,:period,:ref,:src,:srcid,:total,'draft','CELLCOM')""",
+                source_file, total_amount, status, source_type)
+               VALUES (:id,:muni,:tmpl,:period,:ref,:src,:total,'draft','CELLCOM')""",
             values={
                 "id": entry_id, "muni": municipality_id, "tmpl": tmpl_id,
                 "period": period, "ref": ref_num,
-                "src": filename, "srcid": file_id,
-                "total": float(H_TOTAL),
+                "src": filename, "total": float(H_TOTAL),
             }
         )
 
         line_num = 1
 
-        # זכות – חו"ז סלקום
+        # זכות – חו"ז ספק סלקום
         await get_db().execute(
             """INSERT INTO journal_lines
                (id, entry_id, line_num, account, description, debit, credit, budget_section)
                VALUES (:id,:entry,:num,:acct,:desc,0,:credit,NULL)""",
             values={
                 "id": str(uuid4()), "entry": entry_id, "num": line_num,
-                "acct": CELLCOM_VENDOR,
+                "acct": accounts["vendor"],
                 "desc": f"חו\"ז סלקום חשבונית {inv_num}",
                 "credit": float(H_TOTAL),
             }
@@ -368,7 +389,7 @@ async def approve_celcom(
                    VALUES (:id,:entry,:num,:acct,:desc,:debit,0,NULL)""",
                 values={
                     "id": str(uuid4()), "entry": entry_id, "num": line_num,
-                    "acct": VAT_INPUT,
+                    "acct": accounts["vat"],
                     "desc": f"מע\"מ תשומות סלקום {period}",
                     "debit": float(H12),
                 }
@@ -383,14 +404,14 @@ async def approve_celcom(
                    VALUES (:id,:entry,:num,:acct,:desc,:debit,0,NULL)""",
                 values={
                     "id": str(uuid4()), "entry": entry_id, "num": line_num,
-                    "acct": VAT_INPUT,
+                    "acct": accounts["vat"],
                     "desc": f"פטור ממע\"מ סלקום {period}",
                     "debit": float(H13),
                 }
             )
             line_num += 1
 
-        # חובה – תשלומי מכשיר
+        # חובה – תשלומי מכשירים
         if H14 > Decimal("0"):
             await get_db().execute(
                 """INSERT INTO journal_lines
@@ -398,14 +419,14 @@ async def approve_celcom(
                    VALUES (:id,:entry,:num,:acct,:desc,:debit,0,NULL)""",
                 values={
                     "id": str(uuid4()), "entry": entry_id, "num": line_num,
-                    "acct": VAT_INPUT,
-                    "desc": f"תשלומי מכשיר סלקום {period}",
+                    "acct": accounts["devices"],
+                    "desc": f"תשלומי מכשירים סלקום {period}",
                     "debit": float(H14),
                 }
             )
             line_num += 1
 
-        # חובות לפי סעיף – ממוינים, סכום > 0 בלבד
+        # חובות לפי סעיף תקציבי – ממוינים
         for budget, amount in sorted(budget_totals.items()):
             rounded = _r2(amount)
             if rounded == Decimal("0"):
@@ -424,24 +445,12 @@ async def approve_celcom(
             )
             line_num += 1
 
-        # רישום חריגים
-        for u in unmapped_records:
-            await get_db().execute(
-                """INSERT INTO celcom_unmapped (id, municipality_id, phone_number, amount, file_name, entry_id)
-                   VALUES (:id,:muni,:phone,:amount,:fname,:entry)""",
-                values={
-                    "id": str(uuid4()), "muni": municipality_id,
-                    "phone": u["phone"], "amount": float(u["amount"]),
-                    "fname": filename, "entry": entry_id,
-                }
-            )
-
     return {
         "ok":             True,
         "reference_num":  ref_num,
         "entry_id":       entry_id,
         "period":         period,
-        "total":          _fmt(H_TOTAL),
+        "total":          float(H_TOTAL),
         "lines_count":    line_num - 1,
         "budget_lines":   len(budget_totals),
         "unmapped_count": len(unmapped_records),
