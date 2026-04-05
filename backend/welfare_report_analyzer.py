@@ -56,6 +56,9 @@ _HEADER_MAP = {
     "expense":  ["הוצאות להתחשבנות מצטברת"],
     "budget":   ["הקצבה שנתית בשקלים", "הקצבה שנתית"],
     "budget_fallback": ["חלק המשרד לפי הסיווג"],
+    "units_actual":    ["יחידות ביצוע מצטבר"],
+    "units_annual":    ["הקצבה ביחידות שנתי"],
+    "classification":  ["אופן סיווג להתחשבנות"],
     "maslul":   ["מסלול תשלום"],
     "name":     ["שם סעיף"],
     "semel":    ["סמל הסעיף", "סמל סעיף"],
@@ -247,6 +250,9 @@ def parse_excel(path: str) -> ReportData:
     c_expense = col.get("expense")
     c_budget = col.get("budget")
     c_budget_fb = col.get("budget_fallback")
+    c_units_actual = col.get("units_actual")
+    c_units_annual = col.get("units_annual")
+    c_classification = col.get("classification")
     c_maslul = col.get("maslul")
     c_name = col.get("name")
     c_semel = col.get("semel")
@@ -282,6 +288,19 @@ def parse_excel(path: str) -> ReportData:
         budget = _safe_float(budget_raw)
         if budget == 0 and _safe_float(budget_fb) != 0:
             budget = _safe_float(budget_fb)
+
+        # Quantitative sections: col7=None and classification='כמותי'
+        classification = _safe_str(_rv(row, c_classification))
+        if budget_raw is None and "כמותי" in classification:
+            expense_val = _safe_float(_rv(row, c_expense))
+            units_actual = _safe_float(_rv(row, c_units_actual))
+            units_annual = _safe_float(_rv(row, c_units_annual))
+            if expense_val > 0 and units_actual > 0:
+                tariff = expense_val / units_actual
+                budget = round(units_annual * tariff, 2)
+            else:
+                continue  # skip section with no data
+
         expense = _safe_float(_rv(row, c_expense))
         balance = _safe_float(_rv(row, c_balance))
         charge = _safe_float(_rv(row, c_charge))
