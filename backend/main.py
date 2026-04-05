@@ -34,7 +34,13 @@ async def global_exception_handler(request: Request, exc: Exception):
     return JSONResponse(status_code=500, content={"detail": str(exc), "traceback": tb[-1000:]})
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "https://yomanit.vercel.app",
+        "https://www.yomanit.vercel.app",
+        "http://localhost:3000",
+        "http://localhost:3001",
+        "*",
+    ],
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
