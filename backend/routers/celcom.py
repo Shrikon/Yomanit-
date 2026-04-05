@@ -36,7 +36,9 @@ def normalize_phone(phone) -> str:
     return s if s.isdigit() and s else ""
 
 
-def _r2(d: Decimal) -> Decimal:
+def _r2(d) -> Decimal:
+    if not isinstance(d, Decimal):
+        d = Decimal(str(d))
     return d.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 
