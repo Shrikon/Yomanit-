@@ -606,30 +606,27 @@ def generate_pdf(report: ReportData, output_path: str) -> str:
 
     pdf.spacer(10)
 
-    # ── Section 3: Overbudget (expense > budget) ──
-    pdf.draw_heading("סעיפים עם חריגה (הוצאה > הקצבה)")
+    # ── Section 3: Overbudget (expense - proportional > 100,000) ──
+    pdf.draw_heading("סעיפים עם חריגה (הוצאה מצטברת − תקציב יחסי > 100,000)")
 
     overbudget = [
         r for r in report.rows
-        if r.budget_annual > 0 and r.expense_cumulative > r.budget_annual
+        if r.difference > 100000
     ]
-    overbudget.sort(
-        key=lambda r: r.expense_cumulative - r.budget_annual, reverse=True
-    )
+    overbudget.sort(key=lambda r: r.difference, reverse=True)
 
     if overbudget:
         headers = ["שם סעיף", "סמל", "הקצבה שנתית", "תקציב יחסי",
-                   "הוצאה מצטברת", "הפרש", "חריגה שנתית"]
+                   "הוצאה מצטברת", "חריגה"]
         data = [
             [r.name, r.semel, _fmt_num(r.budget_annual),
              _fmt_num(r.budget_proportional), _fmt_num(r.expense_cumulative),
-             _fmt_num(r.difference),
-             _fmt_num(r.expense_cumulative - r.budget_annual)]
+             _fmt_num(r.difference)]
             for r in overbudget
         ]
         pdf.draw_data_table(headers, data)
     else:
-        pdf.draw_text(".אין סעיפים עם חריגה תקציבית")
+        pdf.draw_text(".אין סעיפים עם חריגה מעל 100,000")
 
     pdf.save()
     return output_path
@@ -660,7 +657,7 @@ def main():
     ]
     overbudget = [
         r for r in report.rows
-        if r.budget_annual > 0 and r.expense_cumulative > r.budget_annual
+        if r.difference > 100000
     ]
     print(f"[ANALYZER] סעיפים לא מנוצלים: {len(underutilized)}")
     print(f"[ANALYZER] סעיפים בחריגה: {len(overbudget)}")
