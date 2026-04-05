@@ -73,7 +73,9 @@ async def send_treasurer_report(
 
     # 4. Send email via Gmail SMTP
     if not GMAIL_USER or not GMAIL_APP_PASSWORD:
-        print(f"[EMAIL] GMAIL credentials not set — would send to {to_email}", flush=True)
+        print(f"[EMAIL] GMAIL credentials not set (GMAIL_USER={'set' if GMAIL_USER else 'EMPTY'}, "
+              f"GMAIL_APP_PASSWORD={'set' if GMAIL_APP_PASSWORD else 'EMPTY'}) — "
+              f"skipping send to {to_email}", flush=True)
         return
 
     month_he = MONTHS_HE.get(month, str(month))

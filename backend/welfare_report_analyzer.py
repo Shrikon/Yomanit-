@@ -581,52 +581,19 @@ def generate_pdf(report: ReportData, output_path: str) -> str:
     ])
     pdf.spacer(10)
 
-    # ── Section 2: Underutilized (balance > 20% of annual) ──
-    pdf.draw_heading("סעיפים עם תקציב לא מנוצל (יתרה > 20% מהקצבה)")
+    # ── Section 2: All active sections sorted by difference ──
+    pdf.draw_heading("פירוט סעיפים — ממוין לפי הפרש (חריגה → לא מנוצל)")
 
-    underutilized = [
-        r for r in report.rows
-        if r.budget_annual > 0 and r.balance > r.budget_annual * 0.2
+    all_rows = sorted(report.rows, key=lambda r: r.difference)
+    headers = ["שם סעיף", "סמל", "הקצבה שנתית", "תקציב יחסי",
+               "הוצאה מצטברת", "הפרש", "% ניצול"]
+    data = [
+        [r.name, r.semel, _fmt_num(r.budget_annual),
+         _fmt_num(r.budget_proportional), _fmt_num(r.expense_cumulative),
+         _fmt_num(r.difference), f"{r.utilization_pct}%"]
+        for r in all_rows
     ]
-    underutilized.sort(key=lambda r: r.balance, reverse=True)
-
-    if underutilized:
-        headers = ["שם סעיף", "סמל", "הקצבה שנתית", "תקציב יחסי",
-                   "הוצאה מצטברת", "הפרש", "יתרה", "% ניצול"]
-        data = [
-            [r.name, r.semel, _fmt_num(r.budget_annual),
-             _fmt_num(r.budget_proportional), _fmt_num(r.expense_cumulative),
-             _fmt_num(r.difference), _fmt_num(r.balance),
-             f"{r.utilization_pct}%"]
-            for r in underutilized
-        ]
-        pdf.draw_data_table(headers, data)
-    else:
-        pdf.draw_text(".אין סעיפים עם יתרה מעל 20%")
-
-    pdf.spacer(10)
-
-    # ── Section 3: Overbudget (expense - proportional > 100,000) ──
-    pdf.draw_heading("סעיפים עם חריגה (הוצאה מצטברת − תקציב יחסי > 100,000)")
-
-    overbudget = [
-        r for r in report.rows
-        if r.difference > 100000
-    ]
-    overbudget.sort(key=lambda r: r.difference, reverse=True)
-
-    if overbudget:
-        headers = ["שם סעיף", "סמל", "הקצבה שנתית", "תקציב יחסי",
-                   "הוצאה מצטברת", "חריגה"]
-        data = [
-            [r.name, r.semel, _fmt_num(r.budget_annual),
-             _fmt_num(r.budget_proportional), _fmt_num(r.expense_cumulative),
-             _fmt_num(r.difference)]
-            for r in overbudget
-        ]
-        pdf.draw_data_table(headers, data)
-    else:
-        pdf.draw_text(".אין סעיפים עם חריגה מעל 100,000")
+    pdf.draw_data_table(headers, data)
 
     pdf.save()
     return output_path
@@ -651,16 +618,10 @@ def main():
     print(f'[ANALYZER] סה"כ הקצבה: {_fmt_num(report.total_budget)}')
     print(f'[ANALYZER] סה"כ הוצאה: {_fmt_num(report.total_expense)}')
 
-    underutilized = [
-        r for r in report.rows
-        if r.budget_annual > 0 and r.balance > r.budget_annual * 0.2
-    ]
-    overbudget = [
-        r for r in report.rows
-        if r.difference > 100000
-    ]
-    print(f"[ANALYZER] סעיפים לא מנוצלים: {len(underutilized)}")
+    overbudget = [r for r in report.rows if r.difference > 0]
+    underutil = [r for r in report.rows if r.difference < 0]
     print(f"[ANALYZER] סעיפים בחריגה: {len(overbudget)}")
+    print(f"[ANALYZER] סעיפים מתחת לתקציב: {len(underutil)}")
 
     generate_pdf(report, output_pdf)
     print(f"[ANALYZER] PDF נוצר: {output_pdf}")
