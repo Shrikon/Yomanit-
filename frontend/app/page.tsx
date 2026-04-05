@@ -92,7 +92,7 @@ function CelcomDashboard({ muni, view, setView }: { muni: any, view: string, set
       fd.append('period', celcomPeriod);
       const res = await fetch(`${API}/celcom/approve`, { method: 'POST', body: fd });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || 'שגיאה ביצירת פקודה');
+      if (!res.ok) { console.error('[CELCOM APPROVE 500]', data); throw new Error(data.detail || 'שגיאה ביצירת פקודה'); }
       alert(`✅ פקודה נוצרה!\n${data.reference_num}\nסה"כ: ₪${data.total?.toLocaleString()}\n${data.lines_count} שורות | ${data.budget_lines} סעיפים`);
       setPreviewResult(null); setLastFile(null); setView('home');
     } catch (err: unknown) {
