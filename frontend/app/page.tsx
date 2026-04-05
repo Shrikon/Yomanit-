@@ -158,7 +158,7 @@ function CelcomDashboard({ muni, view, setView }: { muni: any, view: string, set
                   fd.append('municipality_id', muni.id);
                   const res = await fetch(`${API}/celcom/preview`, { method: 'POST', body: fd });
                   const data = await res.json();
-                  if (!res.ok) throw new Error(data.detail || 'שגיאה בעיבוד הקובץ');
+                  if (!res.ok) { console.error('[CELCOM 500]', data); throw new Error(data.detail || 'שגיאה בעיבוד הקובץ'); }
                   setPreviewResult(data);
                   setLastFile(file);
                 } catch (err: unknown) {
