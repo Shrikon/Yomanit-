@@ -1,16 +1,18 @@
 """
-email_service.py – Send treasurer reports via SendGrid.
+email_service.py – Send treasurer reports via Gmail SMTP.
 
-Requires SENDGRID_API_KEY environment variable.
+Requires environment variables: GMAIL_USER, GMAIL_APP_PASSWORD
 """
 
 import os
-import base64
+import smtplib
 import tempfile
-from pathlib import Path
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from email.mime.application import MIMEApplication
 
-SENDGRID_API_KEY = os.getenv("SENDGRID_API_KEY", "")
-FROM_EMAIL = os.getenv("SENDGRID_FROM_EMAIL", "noreply@yomanit.co.il")
+GMAIL_USER = os.getenv("GMAIL_USER", "")
+GMAIL_APP_PASSWORD = os.getenv("GMAIL_APP_PASSWORD", "")
 
 MONTHS_HE = {
     1: "ינואר", 2: "פברואר", 3: "מרץ", 4: "אפריל",
@@ -25,7 +27,7 @@ async def send_treasurer_report(
     month: int,
     year: int,
 ):
-    """Generate PDF from Excel and email it to the treasurer."""
+    """Generate PDF from Excel and email it to the treasurer via Gmail SMTP."""
     import db
 
     # 1. Get treasurer email
@@ -69,44 +71,39 @@ async def send_treasurer_report(
         except OSError:
             pass
 
-    # 4. Send email via SendGrid
-    if not SENDGRID_API_KEY:
-        print(f"[EMAIL] SENDGRID_API_KEY not set — would send to {to_email}", flush=True)
+    # 4. Send email via Gmail SMTP
+    if not GMAIL_USER or not GMAIL_APP_PASSWORD:
+        print(f"[EMAIL] GMAIL credentials not set — would send to {to_email}", flush=True)
         return
-
-    from sendgrid import SendGridAPIClient
-    from sendgrid.helpers.mail import (
-        Mail, Attachment, FileContent, FileName, FileType, Disposition,
-    )
 
     month_he = MONTHS_HE.get(month, str(month))
     subject = f"דוח גזבר רווחה — {muni_name} {month_he}/{year}"
-    filename = f"treasurer_report_{muni_name}_{month}_{year}.pdf"
+    pdf_filename = f"treasurer_report_{muni_name}_{month}_{year}.pdf"
 
-    message = Mail(
-        from_email=FROM_EMAIL,
-        to_emails=to_email,
-        subject=subject,
-        html_content=f"""
-        <div dir="rtl" style="font-family: Arial, sans-serif;">
-            <h2>דוח גזבר רווחה</h2>
-            <p><strong>רשות:</strong> {muni_name}</p>
-            <p><strong>תקופה:</strong> {month_he} {year}</p>
-            <p>הדוח מצורף כ-PDF.</p>
-            <hr>
-            <p style="color: #999; font-size: 12px;">נשלח אוטומטית ממערכת יומנית</p>
-        </div>
-        """,
-    )
+    msg = MIMEMultipart()
+    msg["From"] = GMAIL_USER
+    msg["To"] = to_email
+    msg["Subject"] = subject
 
-    attachment = Attachment(
-        FileContent(base64.b64encode(pdf_bytes).decode()),
-        FileName(filename),
-        FileType("application/pdf"),
-        Disposition("attachment"),
-    )
-    message.attachment = attachment
+    html = f"""\
+    <div dir="rtl" style="font-family: Arial, sans-serif;">
+        <h2>דוח גזבר רווחה</h2>
+        <p><strong>רשות:</strong> {muni_name}</p>
+        <p><strong>תקופה:</strong> {month_he} {year}</p>
+        <p>הדוח מצורף כ-PDF.</p>
+        <hr>
+        <p style="color: #999; font-size: 12px;">נשלח אוטומטית ממערכת יומנית</p>
+    </div>
+    """
+    msg.attach(MIMEText(html, "html", "utf-8"))
 
-    sg = SendGridAPIClient(SENDGRID_API_KEY)
-    response = sg.send(message)
-    print(f"[EMAIL] Sent to {to_email}: status={response.status_code}", flush=True)
+    attachment = MIMEApplication(pdf_bytes, _subtype="pdf")
+    attachment.add_header("Content-Disposition", "attachment", filename=pdf_filename)
+    msg.attach(attachment)
+
+    with smtplib.SMTP("smtp.gmail.com", 587) as server:
+        server.starttls()
+        server.login(GMAIL_USER, GMAIL_APP_PASSWORD)
+        server.send_message(msg)
+
+    print(f"[EMAIL] Sent to {to_email} via Gmail SMTP", flush=True)
