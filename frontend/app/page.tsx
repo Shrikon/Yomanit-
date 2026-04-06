@@ -1250,7 +1250,7 @@ export default function App() {
                     {['סמל סעיף','שם','חשבון חובה','חשבון זכות',''].map(h=><th key={h} className="text-right p-3 text-xs text-gray-500 font-medium">{h}</th>)}
                   </tr></thead>
                   <tbody>
-                    {welfareIndexes.filter(i=>!welfareIndexSearch||i.key_value?.includes(welfareIndexSearch)||(i.connection_name||'').includes(welfareIndexSearch)||i.account_code?.includes(welfareIndexSearch)).map((idx:any)=>(
+                    {welfareIndexes.filter(i=>!welfareIndexSearch||i.key_value?.includes(welfareIndexSearch)||(i.connection_name||'').includes(welfareIndexSearch)||i.account_code?.includes(welfareIndexSearch)).filter((idx:any,i:number,arr:any[])=>arr.findIndex((x:any)=>x.key_value===idx.key_value)===i).map((idx:any)=>(
                       <tr key={idx.id} className="border-b border-gray-50 hover:bg-gray-50">
                         <td className="p-3 font-mono text-xs">{idx.key_value}</td>
                         <td className="p-3 text-xs text-gray-500">{idx.connection_name||'—'}</td>
@@ -1265,7 +1265,7 @@ export default function App() {
                           <td className="p-3 flex gap-2"><button onClick={()=>{const db=welfareIndexes.find(x=>x.key_value===idx.key_value&&x.description==='debit');const cr=welfareIndexes.find(x=>x.key_value===idx.key_value&&x.description==='credit');setWelfareEditId(idx.id);setWelfareEditVals({debit:db?.account_code||'',credit:cr?.account_code||'',name:idx.connection_name||''});}} className="text-xs text-blue-600 hover:underline">ערוך</button><button onClick={async()=>{if(!confirm('מחק?'))return;const same=welfareIndexes.filter(x=>x.key_value===idx.key_value);await Promise.all(same.map(x=>apiFetch(`/indexes/${x.id}`,{method:'DELETE'})));setWelfareIndexes(p=>p.filter(x=>x.key_value!==idx.key_value));}} className="text-xs text-red-400 hover:text-red-600">מחק</button></td></>
                         )}
                       </tr>
-                    )).filter((_:any,i:number,arr:any[])=>arr.findIndex((x:any)=>x.key&&x.key===_.key)===i)}
+                    ))}
                   </tbody>
                 </table>
               </div>
