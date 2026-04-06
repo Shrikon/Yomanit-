@@ -110,6 +110,13 @@ INDEXES = [
 async def main():
     conn = await asyncpg.connect(DATABASE_URL)
 
+    # עדכן שם רשות
+    await conn.execute(
+        "UPDATE municipalities SET name = 'מ.א חבל מודיעין' WHERE id = $1",
+        MITAR_ID
+    )
+    print("Updated municipality name to מ.א חבל מודיעין")
+
     # ודא שקיים template חשמל
     tmpl = await conn.fetchrow("SELECT id FROM templates WHERE name = 'electricity'")
     if not tmpl:
