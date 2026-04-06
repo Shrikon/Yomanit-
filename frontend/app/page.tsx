@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 
 const API = process.env.NEXT_PUBLIC_API_URL || 'https://yomanit.onrender.com';
-const BEZEQ_TEMPLATE_ID = '34967fa4-a92c-4876-bf73-f6cf05804519';
+let BEZEQ_TEMPLATE_ID = '34967fa4-a92c-4876-bf73-f6cf05804519';
 
 interface Municipality { id: string; name: string; code: string; }
 interface UploadRow { row_num: number; phone: string; name: string; amount: number; date: string; invoice: string; account: string | null; has_index: boolean; description: string | null; }
@@ -25,7 +25,7 @@ const CATEGORIES = [
   { id: 'other',       label: 'אחר',    icon: '📁', active: false },
 ];
 
-const ELEC_TEMPLATE_ID = '5594291d-2a5f-4b6c-846a-bed1290388b1';
+let ELEC_TEMPLATE_ID = '5594291d-2a5f-4b6c-846a-bed1290388b1';
 
 function CelcomDashboard({ muni, view, setView }: { muni: any, view: string, setView: (v: 'home' | 'intake' | 'indexes') => void }) {
   const [previewResult, setPreviewResult] = React.useState<any>(null);
@@ -628,7 +628,15 @@ export default function App() {
   useEffect(() => {
     if (screen === 'muni') {
       setLoading(true);
-      apiFetch('/municipalities').then(setMunis).catch(() => setError('שגיאה')).finally(() => setLoading(false));
+      Promise.all([
+        apiFetch('/municipalities').then(setMunis),
+        apiFetch('/templates').then((tmpls: any[]) => {
+          const elec = tmpls.find((t: any) => t.name === 'electricity');
+          const bezeq = tmpls.find((t: any) => t.name === 'bezeq');
+          if (elec) ELEC_TEMPLATE_ID = elec.id;
+          if (bezeq) BEZEQ_TEMPLATE_ID = bezeq.id;
+        }).catch(() => {}),
+      ]).catch(() => setError('שגיאה')).finally(() => setLoading(false));
     }
   }, [screen]);
 
