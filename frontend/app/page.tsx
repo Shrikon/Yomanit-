@@ -1225,6 +1225,24 @@ export default function App() {
                           const lines = welfareResult.rows.filter((r:any) => r.amount > 0).map((r:any) => ({ semel: r.semel, account: r.account, amount: r.amount, side: r.side, description: r.description }));
                           const res = await apiFetch('/upload/welfare/approve', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ municipality_id: muni.id, period: `${welfareResult.year || new Date().getFullYear()}-${String(welfareResult.month).padStart(2,'0')}`, month: welfareResult.month, year: welfareResult.year || new Date().getFullYear(), source_file: welfareResult.filename, source_file_b64: welfareFileB64 || undefined, lines }) });
                           alert(`פקודה נוצרה! ${res.reference_num}`);
+                          // Auto-generate & download treasurer PDF
+                          if (welfareFileB64) {
+                            try {
+                              const byteChars = atob(welfareFileB64);
+                              const byteArr = new Uint8Array(byteChars.length);
+                              for (let i = 0; i < byteChars.length; i++) byteArr[i] = byteChars.charCodeAt(i);
+                              const blob = new Blob([byteArr], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+                              const fd = new FormData(); fd.append('file', blob, 'welfare.xlsx');
+                              const pdfRes = await fetch(`${API}/upload/welfare/treasurer-report`, { method: 'POST', body: fd });
+                              if (pdfRes.ok) {
+                                const pdfBlob = await pdfRes.blob();
+                                const url = URL.createObjectURL(pdfBlob);
+                                const a = document.createElement('a'); a.href = url;
+                                a.download = `דוח_גזבר_${muni.name}_${welfareResult.month}_${welfareResult.year || new Date().getFullYear()}.pdf`;
+                                a.click(); URL.revokeObjectURL(url);
+                              }
+                            } catch (e) { console.warn('Treasurer PDF download failed:', e); }
+                          }
                           setWelfareResult(null); setWelfareFileB64(''); setWelfareRefreshKey(k => k + 1); setWelfareView('home');
                         } catch (err: unknown) { setError(err instanceof Error ? err.message : 'שגיאה'); }
                         finally { setWelfareLoading(false); }
