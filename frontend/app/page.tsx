@@ -730,9 +730,10 @@ export default function App() {
     if (!muni || !uploadResult) return;
     setLoading(true); setError('');
     try {
-      const missing = uploadResult.rows.filter(r => !r.has_index && indexMap[r.row_num]);
+      const missing = uploadResult.rows.filter(r => !r.has_index);
       for (const row of missing) {
-        await apiFetch('/indexes', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ municipality_id: muni.id, template_id: BEZEQ_TEMPLATE_ID, key_value: row.phone, account_code: indexMap[row.row_num], description: row.name !== 'nan' ? row.name : row.phone }) });
+        const acct = indexMap[row.row_num] || '';
+        await apiFetch('/indexes', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ municipality_id: muni.id, template_id: BEZEQ_TEMPLATE_ID, key_value: row.phone, account_code: acct || 'PENDING', description: row.name !== 'nan' ? row.name : row.phone }) });
       }
       setStep(3);
     } catch (err: unknown) { setError(err instanceof Error ? err.message : 'שגיאה'); }
@@ -1367,6 +1368,7 @@ export default function App() {
               {step===2 && uploadResult && (
                 <div>
                   <div className="bg-green-50 border border-green-200 rounded-lg p-3 mb-4 text-sm text-green-700">נטענו {uploadResult.total_rows} שורות · {uploadResult.matched} תואמות · {uploadResult.missing} חסרות</div>
+                  {uploadResult.missing > 0 && <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-4 text-sm text-amber-700">מספרים חסרים ייפתחו באינדקס וימתינו לשיוך סעיף תקציבי</div>}
                   <div className="bg-white rounded-xl border border-gray-200 overflow-hidden mb-4">
                     <table className="w-full text-sm">
                       <thead><tr className="bg-gray-50 border-b border-gray-100">
@@ -1377,8 +1379,8 @@ export default function App() {
                           <td className="p-3 font-mono text-xs">{row.phone}</td>
                           <td className="p-3 text-xs text-gray-600">{row.description || row.name}</td>
                           <td className="p-3 text-xs font-medium">₪{row.amount.toLocaleString()}</td>
-                          <td className="p-3">{row.has_index?<code className="text-xs">{row.account}</code>:<input placeholder="קוד..." className="border border-amber-300 rounded px-2 py-1 text-xs w-24" onChange={e=>setIndexMap(m=>({...m,[row.row_num]:e.target.value}))}/>}</td>
-                          <td className="p-3"><span className={`px-2 py-0.5 rounded-full text-xs ${row.has_index?'bg-green-100 text-green-700':'bg-amber-100 text-amber-700'}`}>{row.has_index?'קיים':'חסר'}</span></td>
+                          <td className="p-3">{row.has_index?<code className="text-xs">{row.account}</code>:<input placeholder="סעיף (אופציונלי)" className="border border-amber-300 rounded px-2 py-1 text-xs w-28" onChange={e=>setIndexMap(m=>({...m,[row.row_num]:e.target.value}))}/>}</td>
+                          <td className="p-3"><span className={`px-2 py-0.5 rounded-full text-xs ${row.has_index?'bg-green-100 text-green-700':'bg-amber-100 text-amber-700'}`}>{row.has_index?'קיים':'חדש'}</span></td>
                         </tr>
                       ))}</tbody>
                     </table>
