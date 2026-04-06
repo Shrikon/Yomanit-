@@ -332,7 +332,7 @@ def parse_welfare(content: bytes, month: int = None, index_map: Dict[str, Dict] 
     total_govt   = sum(r['govt_amount']   for r in rows_out)
     total_source = sum(r['source_amount'] for r in rows_out)
     total_choz   = sum(r['choz_amount']   for r in rows_out)
-    missing_index = [r for r in rows_out if not r['in_index'] and r['govt_amount'] != Decimal('0')]
+    missing_index = [r for r in rows_out if not r['in_index'] and (r['govt_amount'] != Decimal('0') or r['source_amount'] != Decimal('0'))]
 
     sm = Decimal(str(summary_mishrad)) if summary_mishrad else Decimal('0')
     sc = Decimal(str(summary_choz))    if summary_choz    else Decimal('0')

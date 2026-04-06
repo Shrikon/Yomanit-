@@ -487,6 +487,26 @@ function WelfareDashboard({ muni, onNewIntake, refreshKey }: { muni: any, onNewI
 
   const treasurerFileRef = React.useRef<HTMLInputElement>(null);
 
+  const downloadMissingReport = async (entryId: string) => {
+    try {
+      // שלוף סעיפים חסרים מהפקודה
+      const data = await apiFetch(`/upload/welfare/${entryId}/missing-sections`);
+      if (!data.missing || data.missing.length === 0) { alert('אין סעיפים חסרים בפקודה זו'); return; }
+      // הפק Excel
+      const res = await fetch(`${API}/upload/welfare/missing-report`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ municipality_id: data.municipality_id, period: data.period, missing: data.missing })
+      });
+      if (!res.ok) throw new Error(await res.text());
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href = url;
+      a.download = `missing_welfare_${data.period.replace('-','_')}.xlsx`;
+      a.click(); URL.revokeObjectURL(url);
+    } catch (e: any) { alert(e.message || 'שגיאה בהפקת דוח סעיפים חסרים'); }
+  };
+
   const handleTreasurerReport = async (file: File) => {
     const form = new FormData();
     form.append('file', file);
@@ -561,6 +581,7 @@ function WelfareDashboard({ muni, onNewIntake, refreshKey }: { muni: any, onNewI
                     </td>
                     <td className="p-2.5 flex gap-2">
                       <button onClick={() => window.open(`${API}/journal-entries/${e.id}/export`, '_blank')} className="text-xs text-blue-600 hover:underline">Excel</button>
+                      {e.status === 'draft' && <button onClick={() => downloadMissingReport(e.id)} className="text-xs text-amber-600 hover:underline">סעיפים חסרים</button>}
                       {e.status !== 'locked' && <button onClick={() => deleteEntry(e.id, e.reference_num)} className="text-xs text-red-400 hover:underline">מחק</button>}
                     </td>
                   </tr>

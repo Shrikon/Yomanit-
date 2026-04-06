@@ -555,3 +555,53 @@ async def welfare_missing_report(payload: MissingReportIn):
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f'attachment; filename="{filename_ascii}"; filename*=UTF-8\'\'{filename_utf8}'},
     )
+
+
+# ─────────────────────────────────────────────
+# GET /upload/welfare/{entry_id}/missing-sections
+# מחזיר רשימת סעיפים חסרים מפקודה קיימת
+# ─────────────────────────────────────────────
+@router.get("/{entry_id}/missing-sections")
+async def get_missing_sections(entry_id: str):
+    from main import database
+
+    entry = await database.fetch_one(
+        """SELECT je.id, je.municipality_id, je.period, m.name as muni_name
+           FROM journal_entries je
+           JOIN municipalities m ON m.id = je.municipality_id
+           WHERE je.id = :id AND je.is_active = TRUE""",
+        values={"id": entry_id}
+    )
+    if not entry:
+        raise HTTPException(status_code=404, detail="פקודה לא נמצאה")
+
+    # שורות ללא חשבון = סעיפים חסרים
+    lines = await database.fetch_all(
+        """SELECT key_value as semel, description as name, debit, credit
+           FROM journal_lines
+           WHERE entry_id = :eid AND (account = '' OR account IS NULL OR account = 'PENDING_D' OR account = 'PENDING_C')
+           ORDER BY line_num""",
+        values={"eid": entry_id}
+    )
+
+    # איחוד לפי סמל (כל סמל יכול להופיע פעמיים — debit + credit)
+    by_semel: dict = {}
+    for line in lines:
+        semel = line["semel"] or ""
+        if not semel:
+            continue
+        if semel not in by_semel:
+            by_semel[semel] = {"semel": semel, "name": line["name"] or semel, "govt_amount": 0, "source_amount": 0}
+        by_semel[semel]["govt_amount"] += float(line["debit"] or 0)
+        by_semel[semel]["source_amount"] += float(line["credit"] or 0)
+
+    missing = list(by_semel.values())
+
+    return {
+        "entry_id": entry_id,
+        "municipality_id": str(entry["municipality_id"]),
+        "municipality_name": entry["muni_name"],
+        "period": entry["period"],
+        "missing": missing,
+        "count": len(missing),
+    }
