@@ -296,21 +296,25 @@ async def approve_welfare(payload: WelfareApproveIn):
             if not (line.account or '').strip()
         ]
         if missing_semels:
+            seen_semels = set()
             for line in missing_semels:
+                if line.semel in seen_semels:
+                    continue
+                seen_semels.add(line.semel)
                 conn_name = (line.description or '').strip() or None
                 # Insert debit placeholder
                 await database.execute(
                     """INSERT INTO indexes (id, municipality_id, template_id, key_value, account_code, description, connection_name, active)
-                       VALUES (:id, :muni, :tmpl, :key, '', 'debit', :conn, TRUE)
-                       ON CONFLICT (municipality_id, template_id, key_value, description)
+                       VALUES (:id, :muni, :tmpl, :key, 'PENDING_D', 'debit', :conn, TRUE)
+                       ON CONFLICT (municipality_id, template_id, key_value, account_code)
                        DO NOTHING""",
                     values={"id": str(uuid4()), "muni": payload.municipality_id, "tmpl": template_id, "key": line.semel, "conn": conn_name}
                 )
                 # Insert credit placeholder
                 await database.execute(
                     """INSERT INTO indexes (id, municipality_id, template_id, key_value, account_code, description, connection_name, active)
-                       VALUES (:id, :muni, :tmpl, :key, '', 'credit', :conn, TRUE)
-                       ON CONFLICT (municipality_id, template_id, key_value, description)
+                       VALUES (:id, :muni, :tmpl, :key, 'PENDING_C', 'credit', :conn, TRUE)
+                       ON CONFLICT (municipality_id, template_id, key_value, account_code)
                        DO NOTHING""",
                     values={"id": str(uuid4()), "muni": payload.municipality_id, "tmpl": template_id, "key": line.semel, "conn": conn_name}
                 )
