@@ -397,7 +397,7 @@ def apply_welfare_splits(parsed: dict):
         acct_134 = row.get("debit_account",  "")  # 134 = debit in DB index
         if govt > Decimal('0'):
             matched.append({
-                "semel": row["semel"] if row["in_index"] else "",
+                "semel": row["semel"],
                 "name": row["name"],
                 "account": acct_184,
                 "amount": float(govt),
@@ -406,7 +406,7 @@ def apply_welfare_splits(parsed: dict):
             })
         elif govt < Decimal('0'):
             matched.append({
-                "semel": row["semel"] if row["in_index"] else "",
+                "semel": row["semel"],
                 "name": row["name"],
                 "account": acct_134,
                 "amount": float(abs(govt)),
@@ -424,7 +424,7 @@ def apply_welfare_splits(parsed: dict):
         acct_134 = row.get("debit_account",  "")
         if source > Decimal('0'):
             matched.append({
-                "semel": row["semel"] if row["in_index"] else "",
+                "semel": row["semel"],
                 "name": row["name"],
                 "account": acct_134,
                 "amount": float(source),
@@ -433,7 +433,7 @@ def apply_welfare_splits(parsed: dict):
             })
         elif source < Decimal('0'):
             matched.append({
-                "semel": row["semel"] if row["in_index"] else "",
+                "semel": row["semel"],
                 "name": row["name"],
                 "account": acct_184,
                 "amount": float(abs(source)),
