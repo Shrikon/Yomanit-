@@ -275,33 +275,49 @@ async def approve_welfare(payload: WelfareApproveIn):
                 values={"id": entry_id}
             )
 
-    # ── Auto-insert missing semels into indexes table ──
+    # ── Update index names + auto-insert missing semels ──
     try:
+        from index_cache import invalidate
+        dirty = False
+        # Update connection_name for all lines that have a description
+        for line in payload.lines:
+            desc_name = (line.description or '').strip()
+            if desc_name and line.semel:
+                await database.execute(
+                    """UPDATE indexes SET connection_name = :name, updated_at = NOW()
+                       WHERE municipality_id = :muni AND template_id = :tmpl
+                         AND key_value = :key AND (connection_name IS NULL OR connection_name = '')""",
+                    values={"name": desc_name, "muni": payload.municipality_id, "tmpl": template_id, "key": line.semel}
+                )
+                dirty = True
+        # Auto-insert missing semels
         missing_semels = [
             line for line in payload.lines
             if not (line.account or '').strip()
         ]
         if missing_semels:
-            from index_cache import invalidate
             for line in missing_semels:
+                conn_name = (line.description or '').strip() or None
                 # Insert debit placeholder
                 await database.execute(
-                    """INSERT INTO indexes (id, municipality_id, template_id, key_value, account_code, description, active)
-                       VALUES (:id, :muni, :tmpl, :key, '', 'debit', TRUE)
+                    """INSERT INTO indexes (id, municipality_id, template_id, key_value, account_code, description, connection_name, active)
+                       VALUES (:id, :muni, :tmpl, :key, '', 'debit', :conn, TRUE)
                        ON CONFLICT (municipality_id, template_id, key_value, description)
                        DO NOTHING""",
-                    values={"id": str(uuid4()), "muni": payload.municipality_id, "tmpl": template_id, "key": line.semel}
+                    values={"id": str(uuid4()), "muni": payload.municipality_id, "tmpl": template_id, "key": line.semel, "conn": conn_name}
                 )
                 # Insert credit placeholder
                 await database.execute(
-                    """INSERT INTO indexes (id, municipality_id, template_id, key_value, account_code, description, active)
-                       VALUES (:id, :muni, :tmpl, :key, '', 'credit', TRUE)
+                    """INSERT INTO indexes (id, municipality_id, template_id, key_value, account_code, description, connection_name, active)
+                       VALUES (:id, :muni, :tmpl, :key, '', 'credit', :conn, TRUE)
                        ON CONFLICT (municipality_id, template_id, key_value, description)
                        DO NOTHING""",
-                    values={"id": str(uuid4()), "muni": payload.municipality_id, "tmpl": template_id, "key": line.semel}
+                    values={"id": str(uuid4()), "muni": payload.municipality_id, "tmpl": template_id, "key": line.semel, "conn": conn_name}
                 )
-            invalidate(payload.municipality_id, template_id)
+            dirty = True
             print(f"[WELFARE] Auto-inserted {len(missing_semels)} missing semels into indexes", flush=True)
+        if dirty:
+            invalidate(payload.municipality_id, template_id)
     except Exception as e:
         print(f"[WELFARE] Auto-insert index failed (non-fatal): {e}", flush=True)
 
