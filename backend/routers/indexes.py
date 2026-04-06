@@ -209,10 +209,22 @@ async def update_index(index_id: str, payload: dict):
         values["desc"] = str(payload["description"])
     if not fields:
         return {"updated": False}
-    row = await database.fetch_one("SELECT municipality_id, template_id FROM indexes WHERE id = :id", values={"id": index_id})
-    await database.execute(
-        f"UPDATE indexes SET {', '.join(fields)}, updated_at = NOW() WHERE id = :id",
-        values=values)
+    row = await database.fetch_one("SELECT municipality_id, template_id, account_code FROM indexes WHERE id = :id", values={"id": index_id})
+    try:
+        await database.execute(
+            f"UPDATE indexes SET {', '.join(fields)}, updated_at = NOW() WHERE id = :id",
+            values=values)
+    except Exception as e:
+        if "unique" in str(e).lower() or "duplicate" in str(e).lower():
+            # PENDING row conflicts with existing real row — delete the pending one
+            if row and (str(row["account_code"] or "")).startswith("PENDING"):
+                await database.execute("DELETE FROM indexes WHERE id = :id", values={"id": index_id})
+                if row:
+                    from index_cache import invalidate
+                    invalidate(str(row["municipality_id"]), str(row["template_id"]))
+                return {"updated": True, "merged": True}
+            raise HTTPException(status_code=409, detail=f"סעיף חשבון זה כבר קיים באינדקס")
+        raise
     if row:
         from index_cache import invalidate
         invalidate(str(row["municipality_id"]), str(row["template_id"]))
