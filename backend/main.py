@@ -82,7 +82,8 @@ async def health():
 async def run_setup_mitar_electricity():
     """One-time endpoint to load Mitar electricity indexes and rename municipality."""
     import uuid
-    MITAR_ID = "bdb31b8e-8790-45ad-acdd-8c918876cbad"
+    MITAR_ID = "a367f0f2-9f81-4b33-9fb1-36040e83bead"  # Render DB ID for מ.מ מיתר
+    MUNI_15_ID = "84b1370f-2882-4079-b9de-d4715b3aff96"  # The "15" municipality
     INDEXES = [
         ("342636355","1743000431","דרך מיתר 83"),("342582213","1727000431","שד עומרים מרכז מסחרי_ תחנ"),
         ("342477992","1743000431","עין מור ע\"י מס 47 מאור רח"),("342527628","1723000431","שקמה 36"),
@@ -138,8 +139,8 @@ async def run_setup_mitar_electricity():
     ]
     async with db.transaction() as tx:
         conn = tx._conn
-        # Update municipality name
-        await conn.execute("UPDATE municipalities SET name = 'מ.א חבל מודיעין' WHERE id = $1", MITAR_ID)
+        # Fix the "15" municipality name and code
+        await conn.execute("UPDATE municipalities SET name = 'מ.א חבל מודיעין', code = '15' WHERE id = $1", MUNI_15_ID)
         # Get electricity template
         tmpl = await conn.fetchrow("SELECT id FROM templates WHERE name = 'electricity'")
         if not tmpl:
