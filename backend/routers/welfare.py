@@ -256,8 +256,8 @@ async def approve_welfare(payload: WelfareApproveIn):
                     "desc":   f"חו\"ז משרד הרווחה {period_str}",
                     "debit":  float(abs(diff)) if diff > 0 else 0.0,
                     "credit": float(abs(diff)) if diff < 0 else 0.0,
-                    "ref":    "חוז",
-                    "key":    "חוז",
+                    "ref":    "",
+                    "key":    "",
                 }
             )
 

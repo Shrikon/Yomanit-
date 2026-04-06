@@ -375,6 +375,9 @@ def apply_welfare_splits(parsed: dict):
     """
     welfare_index = parsed.get("_welfare_index", {})
     choz_account  = welfare_index.get("חוז", {}).get("credit", "")
+    month = parsed.get("month", 0)
+    year  = parsed.get("year", 2026)
+    period_suffix = f" {str(month).zfill(2)}/{str(year)[-2:]}" if month else ""
 
     if not choz_account:
         print("[WELFARE] WARNING: no 'חוז' in index_map — choz line skipped")
@@ -399,7 +402,7 @@ def apply_welfare_splits(parsed: dict):
                 "account": acct_184,
                 "amount": float(govt),
                 "side": "debit",
-                "description": f"רווחה {row['semel']} {row['name']}",
+                "description": f"{row['name']}{period_suffix}",
             })
         elif govt < Decimal('0'):
             matched.append({
@@ -408,7 +411,7 @@ def apply_welfare_splits(parsed: dict):
                 "account": acct_134,
                 "amount": float(abs(govt)),
                 "side": "credit",
-                "description": f"רווחה {row['semel']} {row['name']}",
+                "description": f"{row['name']}{period_suffix}",
             })
 
     # --- מעבר 2: שורות הכנסה/134 (source = סיכום + ילדי חוץ + הפרשים) ---
@@ -426,7 +429,7 @@ def apply_welfare_splits(parsed: dict):
                 "account": acct_134,
                 "amount": float(source),
                 "side": "credit",
-                "description": f"רווחה {row['semel']} {row['name']}",
+                "description": f"{row['name']}{period_suffix}",
             })
         elif source < Decimal('0'):
             matched.append({
@@ -435,7 +438,7 @@ def apply_welfare_splits(parsed: dict):
                 "account": acct_184,
                 "amount": float(abs(source)),
                 "side": "debit",
-                "description": f"רווחה {row['semel']} {row['name']}",
+                "description": f"{row['name']}{period_suffix}",
             })
 
     # --- מעבר 3: שורת חו"ז שיורית אחת ---
