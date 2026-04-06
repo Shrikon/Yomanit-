@@ -632,6 +632,7 @@ export default function App() {
   const [settings, setSettings] = useState<{vendor_account:string}>({vendor_account:'6000203000'});
   const [settingsSaved, setSettingsSaved] = useState(false);
   const [treasurerEmail, setTreasurerEmail] = useState('');
+  const [accountantEmail, setAccountantEmail] = useState('');
   const [ministryAccount, setMinistryAccount] = useState('');
   const [treasurerSaved, setTreasurerSaved] = useState(false);
   const [indexSearch, setIndexSearch] = useState('');
@@ -696,6 +697,7 @@ export default function App() {
     try {
       const data = await apiFetch(`/municipalities/${muni.id}/settings`);
       setTreasurerEmail(data?.treasurer_email || '');
+      setAccountantEmail(data?.accountant_email || '');
       setMinistryAccount(data?.ministry_account || '');
     } catch { }
   }
@@ -705,6 +707,9 @@ export default function App() {
     setLoading(true);
     try {
       await apiFetch(`/municipalities/${muni.id}/settings`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({template_name: 'general', key: 'treasurer_email', value: treasurerEmail}) });
+      if (accountantEmail) {
+        await apiFetch(`/municipalities/${muni.id}/settings`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({template_name: 'welfare', key: 'accountant_email', value: accountantEmail}) });
+      }
       if (ministryAccount) {
         await apiFetch(`/municipalities/${muni.id}/settings`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({template_name: 'welfare', key: 'ministry_account', value: ministryAccount}) });
       }
@@ -918,7 +923,12 @@ export default function App() {
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">מייל גזבר</label>
             <input type="email" value={treasurerEmail} onChange={e => setTreasurerEmail(e.target.value)} placeholder="treasurer@example.com" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
-            <p className="text-xs text-gray-400 mt-1">כתובת לשליחת דוחות גזבר אוטומטיים</p>
+            <p className="text-xs text-gray-400 mt-1">כתובת לשליחת דוח לגזבר</p>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">מייל מנהלת חשבונות</label>
+            <input type="email" value={accountantEmail} onChange={e => setAccountantEmail(e.target.value)} placeholder="accountant@example.com" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
+            <p className="text-xs text-gray-400 mt-1">כתובת למשלוח פקודת יומן רווחה</p>
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">חו"ז משרד הרווחה</label>
