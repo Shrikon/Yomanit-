@@ -241,7 +241,7 @@ async def approve_welfare(payload: WelfareApproveIn):
                 }
             )
 
-        # שורת איזון — חו"ז משרד הרווחה (זכות)
+        # שורת איזון — חו"ז משרד הרווחה
         if diff != 0:
             line_num = len(payload.lines) + 1
             await database.execute(
@@ -254,8 +254,8 @@ async def approve_welfare(payload: WelfareApproveIn):
                     "num":    line_num,
                     "acct":   ministry_account,
                     "desc":   f"חו\"ז משרד הרווחה {period_str}",
-                    "debit":  float(abs(diff)) if diff < 0 else 0.0,
-                    "credit": float(abs(diff)) if diff > 0 else 0.0,
+                    "debit":  float(abs(diff)) if diff > 0 else 0.0,
+                    "credit": float(abs(diff)) if diff < 0 else 0.0,
                     "ref":    "חוז",
                     "key":    "חוז",
                 }
