@@ -487,6 +487,26 @@ function WelfareDashboard({ muni, onNewIntake, refreshKey }: { muni: any, onNewI
 
   const treasurerFileRef = React.useRef<HTMLInputElement>(null);
 
+  const downloadMissingReport = async (entryId: string) => {
+    try {
+      // שלוף סעיפים חסרים מהפקודה
+      const data = await apiFetch(`/upload/welfare/${entryId}/missing-sections`);
+      if (!data.missing || data.missing.length === 0) { alert('אין סעיפים חסרים בפקודה זו'); return; }
+      // הפק Excel
+      const res = await fetch(`${API}/upload/welfare/missing-report`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ municipality_id: data.municipality_id, period: data.period, missing: data.missing })
+      });
+      if (!res.ok) throw new Error(await res.text());
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href = url;
+      a.download = `missing_welfare_${data.period.replace('-','_')}.xlsx`;
+      a.click(); URL.revokeObjectURL(url);
+    } catch (e: any) { alert(e.message || 'שגיאה בהפקת דוח סעיפים חסרים'); }
+  };
+
   const handleTreasurerReport = async (file: File) => {
     const form = new FormData();
     form.append('file', file);
@@ -561,6 +581,7 @@ function WelfareDashboard({ muni, onNewIntake, refreshKey }: { muni: any, onNewI
                     </td>
                     <td className="p-2.5 flex gap-2">
                       <button onClick={() => window.open(`${API}/journal-entries/${e.id}/export`, '_blank')} className="text-xs text-blue-600 hover:underline">Excel</button>
+                      {e.status === 'draft' && <button onClick={() => downloadMissingReport(e.id)} className="text-xs text-amber-600 hover:underline">סעיפים חסרים</button>}
                       {e.status !== 'locked' && <button onClick={() => deleteEntry(e.id, e.reference_num)} className="text-xs text-red-400 hover:underline">מחק</button>}
                     </td>
                   </tr>
@@ -611,6 +632,7 @@ export default function App() {
   const [settings, setSettings] = useState<{vendor_account:string}>({vendor_account:'6000203000'});
   const [settingsSaved, setSettingsSaved] = useState(false);
   const [treasurerEmail, setTreasurerEmail] = useState('');
+  const [accountantEmail, setAccountantEmail] = useState('');
   const [ministryAccount, setMinistryAccount] = useState('');
   const [treasurerSaved, setTreasurerSaved] = useState(false);
   const [indexSearch, setIndexSearch] = useState('');
@@ -675,6 +697,7 @@ export default function App() {
     try {
       const data = await apiFetch(`/municipalities/${muni.id}/settings`);
       setTreasurerEmail(data?.treasurer_email || '');
+      setAccountantEmail(data?.accountant_email || '');
       setMinistryAccount(data?.ministry_account || '');
     } catch { }
   }
@@ -684,6 +707,9 @@ export default function App() {
     setLoading(true);
     try {
       await apiFetch(`/municipalities/${muni.id}/settings`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({template_name: 'general', key: 'treasurer_email', value: treasurerEmail}) });
+      if (accountantEmail) {
+        await apiFetch(`/municipalities/${muni.id}/settings`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({template_name: 'welfare', key: 'accountant_email', value: accountantEmail}) });
+      }
       if (ministryAccount) {
         await apiFetch(`/municipalities/${muni.id}/settings`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({template_name: 'welfare', key: 'ministry_account', value: ministryAccount}) });
       }
@@ -897,7 +923,12 @@ export default function App() {
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">מייל גזבר</label>
             <input type="email" value={treasurerEmail} onChange={e => setTreasurerEmail(e.target.value)} placeholder="treasurer@example.com" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
-            <p className="text-xs text-gray-400 mt-1">כתובת לשליחת דוחות גזבר אוטומטיים</p>
+            <p className="text-xs text-gray-400 mt-1">כתובת לשליחת דוח לגזבר</p>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">מייל מנהלת חשבונות</label>
+            <input type="email" value={accountantEmail} onChange={e => setAccountantEmail(e.target.value)} placeholder="accountant@example.com" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
+            <p className="text-xs text-gray-400 mt-1">כתובת למשלוח פקודת יומן רווחה</p>
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">חו"ז משרד הרווחה</label>
