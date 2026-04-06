@@ -152,9 +152,8 @@ async def main():
             INSERT INTO indexes (id, municipality_id, template_id, key_value,
                                  account_code, description, connection_name)
             VALUES ($1, $2, $3, $4, $5, $6, $7)
-            ON CONFLICT (municipality_id, template_id, key_value)
-            DO UPDATE SET account_code = EXCLUDED.account_code,
-                          connection_name = EXCLUDED.connection_name,
+            ON CONFLICT (municipality_id, template_id, key_value, account_code)
+            DO UPDATE SET connection_name = EXCLUDED.connection_name,
                           updated_at = NOW()
         """, str(uuid.uuid4()), MITAR_ID, tmpl_id,
              contract, account, desc, name)
