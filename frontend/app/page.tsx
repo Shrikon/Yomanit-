@@ -704,7 +704,7 @@ export default function App() {
     if (!muni) return;
     setLoading(true);
     try {
-      const data = await apiFetch(`/indexes?municipality_id=${muni.id}&limit=300${indexSearch ? '&search='+encodeURIComponent(indexSearch) : ''}`);
+      const data = await apiFetch(`/indexes?municipality_id=${muni.id}&template_id=${BEZEQ_TEMPLATE_ID}&limit=300${indexSearch ? '&search='+encodeURIComponent(indexSearch) : ''}`);
       setIndexes(data);
     } catch { setError('שגיאה'); } finally { setLoading(false); }
   }
