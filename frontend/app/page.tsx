@@ -354,11 +354,85 @@ function VendorAccountPanel({ muni, templateName, label, defaultAccount }: { mun
   );
 }
 
+function JournalPreviewModal({ entryId, onClose }: { entryId: string, onClose: () => void }) {
+  const [data, setData] = React.useState<any>(null);
+  const [loading, setLoading] = React.useState(true);
+
+  React.useEffect(() => {
+    apiFetch(`/journal-entries/${entryId}`).then(setData).catch(() => {}).finally(() => setLoading(false));
+  }, [entryId]);
+
+  const lines = data?.lines || [];
+  const totalDebit = lines.reduce((s: number, l: any) => s + (parseFloat(l.debit) || 0), 0);
+  const totalCredit = lines.reduce((s: number, l: any) => s + (parseFloat(l.credit) || 0), 0);
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={onClose}>
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-4xl max-h-[85vh] overflow-hidden" dir="rtl" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between p-4 border-b border-gray-200 bg-gray-50">
+          <div>
+            <h2 className="text-sm font-semibold text-gray-900">תצוגה מקדימה – {data?.reference_num || ''}</h2>
+            <p className="text-xs text-gray-500">{data?.municipality_name} · {data?.period} · {data?.template_name || ''}</p>
+          </div>
+          <div className="flex gap-2 items-center">
+            {data && <button onClick={() => window.open(`${API}/journal-entries/${entryId}/export`, '_blank')} className="text-xs bg-blue-600 text-white px-3 py-1.5 rounded-lg hover:bg-blue-700">Excel</button>}
+            <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-lg px-2">✕</button>
+          </div>
+        </div>
+        <div className="overflow-auto max-h-[70vh] p-4">
+          {loading ? <div className="p-12 text-center text-sm text-gray-400">טוען...</div> : data ? (
+            <>
+              <div className="grid grid-cols-4 gap-3 mb-4">
+                {[['מספר פקודה', data.reference_num], ['תקופה', data.period], ['סטטוס', data.status === 'draft' ? 'טיוטה' : data.status === 'exported' ? 'יוצא' : data.status], ['סה"כ', `₪${Math.round(totalDebit).toLocaleString()}`]].map(([l, v]) => (
+                  <div key={l as string} className="bg-gray-50 rounded-lg p-3">
+                    <div className="text-xs text-gray-500 mb-0.5">{l}</div>
+                    <div className="text-sm font-medium text-gray-900">{v}</div>
+                  </div>
+                ))}
+              </div>
+              <table className="w-full text-sm border border-gray-200 rounded-lg overflow-hidden">
+                <thead>
+                  <tr className="bg-gray-50 border-b border-gray-200">
+                    {['#', 'חשבון', 'תיאור', 'חובה', 'זכות', 'אסמכתא'].map(h => (
+                      <th key={h} className="text-right p-2.5 text-xs text-gray-500 font-medium">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {lines.map((l: any, i: number) => (
+                    <tr key={l.id || i} className="border-b border-gray-50 hover:bg-gray-50">
+                      <td className="p-2.5 text-xs text-gray-400">{l.line_num || i + 1}</td>
+                      <td className="p-2.5 font-mono text-xs">{l.account}</td>
+                      <td className="p-2.5 text-xs text-gray-700">{l.description || '—'}</td>
+                      <td className="p-2.5 text-xs font-medium text-red-700">{parseFloat(l.debit) > 0 ? `₪${parseFloat(l.debit).toLocaleString()}` : ''}</td>
+                      <td className="p-2.5 text-xs font-medium text-green-700">{parseFloat(l.credit) > 0 ? `₪${parseFloat(l.credit).toLocaleString()}` : ''}</td>
+                      <td className="p-2.5 text-xs text-gray-500">{l.reference || ''}</td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr className="bg-gray-50 border-t border-gray-200 font-semibold">
+                    <td className="p-2.5 text-xs" colSpan={3}>סה"כ ({lines.length} שורות)</td>
+                    <td className="p-2.5 text-xs text-red-700">₪{Math.round(totalDebit).toLocaleString()}</td>
+                    <td className="p-2.5 text-xs text-green-700">₪{Math.round(totalCredit).toLocaleString()}</td>
+                    <td className="p-2.5 text-xs text-gray-500">{Math.abs(totalDebit - totalCredit) < 0.1 ? 'מאוזן ✓' : `הפרש: ₪${Math.abs(totalDebit - totalCredit).toFixed(2)}`}</td>
+                  </tr>
+                </tfoot>
+              </table>
+            </>
+          ) : <div className="p-12 text-center text-sm text-red-400">שגיאה בטעינה</div>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ElectricityDashboard({ muni, onNewIntake }: { muni: any, onNewIntake: () => void }) {
   const [entries, setEntries] = React.useState<any[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [vendorAccount, setVendorAccount] = React.useState('7000000000');
   const [editVendor, setEditVendor] = React.useState(false);
+  const [previewId, setPreviewId] = React.useState<string|null>(null);
   const ELEC_TEMPLATE = '5594291d-2a5f-4b6c-846a-bed1290388b1';
 
   const loadData = () => {
@@ -461,6 +535,7 @@ function ElectricityDashboard({ muni, onNewIntake }: { muni: any, onNewIntake: (
                         </span>
                       </td>
                       <td className="p-2.5 flex gap-2">
+                        <button onClick={() => setPreviewId(e.id)} className="text-xs text-purple-600 hover:underline">תצוגה</button>
                         <button onClick={() => window.open(`${API}/journal-entries/${e.id}/export`, '_blank')} className="text-xs text-blue-600 hover:underline">Excel</button>
                         {e.status === 'draft' && <button onClick={() => deleteEntry(e.id, e.reference_num)} className="text-xs text-red-400 hover:underline">מחק</button>}
                       </td>
@@ -471,6 +546,7 @@ function ElectricityDashboard({ muni, onNewIntake }: { muni: any, onNewIntake: (
         </div>
         <VendorAccountPanel muni={muni} templateName="electricity" label='חו"ז חברת חשמל' defaultAccount="7000000000" />
       </div>
+      {previewId && <JournalPreviewModal entryId={previewId} onClose={() => setPreviewId(null)} />}
       </>)}
     </div>
   );
@@ -480,6 +556,7 @@ function WelfareDashboard({ muni, onNewIntake, refreshKey }: { muni: any, onNewI
   const [entries, setEntries] = React.useState<any[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [templateId, setTemplateId] = React.useState<string|null>(null);
+  const [previewId, setPreviewId] = React.useState<string|null>(null);
 
   const loadData = async () => {
     if (!muni) return;
@@ -588,6 +665,7 @@ function WelfareDashboard({ muni, onNewIntake, refreshKey }: { muni: any, onNewI
                         </span>
                       </td>
                       <td className="p-2.5 flex gap-2">
+                        <button onClick={() => setPreviewId(e.id)} className="text-xs text-purple-600 hover:underline">תצוגה</button>
                         <button onClick={() => window.open(`${API}/journal-entries/${e.id}/export`, '_blank')} className="text-xs text-blue-600 hover:underline">Excel</button>
                         {e.status !== 'locked' && <button onClick={() => deleteEntry(e.id, e.reference_num)} className="text-xs text-red-400 hover:underline">מחק</button>}
                       </td>
@@ -598,6 +676,7 @@ function WelfareDashboard({ muni, onNewIntake, refreshKey }: { muni: any, onNewI
         </div>
         <VendorAccountPanel muni={muni} templateName="welfare" label='חו"ז משרד הרווחה' defaultAccount="7000034000" />
       </div>
+      {previewId && <JournalPreviewModal entryId={previewId} onClose={() => setPreviewId(null)} />}
       </>)}
     </div>
   );
@@ -609,6 +688,7 @@ export default function App() {
   const [munis, setMunis] = useState<Municipality[]>([]);
   const [activeTab, setActiveTab] = useState('bezeq');
   const [bezeqView, setBezeqView] = useState<'home'|'intake'|'indexes'|'settings'>('home');
+  const [bezeqPreviewId, setBezeqPreviewId] = useState<string|null>(null);
   const [elecView, setElecView] = useState<'home'|'intake'|'indexes'>('home');
   const [celcomView, setCelcomView] = useState<'home'|'intake'|'indexes'>('home');
   const [elecIndexSearch, setElecIndexSearch] = useState('');
@@ -1406,6 +1486,7 @@ export default function App() {
                           <td className="p-3 font-medium text-xs">₪{(e.total_amount||0).toLocaleString()}</td>
                           <td className="p-3"><span className={`px-2 py-0.5 rounded-full text-xs ${e.status==='draft'?'bg-blue-100 text-blue-700':'bg-green-100 text-green-700'}`}>{e.status==='draft'?'טיוטה':'מאושר'}</span></td>
                           <td className="p-3 flex gap-3">
+                            <button onClick={()=>setBezeqPreviewId(e.id)} className="text-xs text-purple-600 hover:underline">תצוגה</button>
                             <button onClick={()=>window.open(`${API}/journal-entries/${e.id}/export`,'_blank')} className="text-xs text-blue-600 hover:underline">Excel</button>
                             {e.status !== 'approved' && <button onClick={()=>deleteJournalEntry(e.id, e.reference_num)} className="text-xs text-red-500 hover:underline">מחק</button>}
                           </td>
@@ -1415,6 +1496,7 @@ export default function App() {
                 </div>
                 <VendorAccountPanel muni={muni} templateName="bezeq" label='חו"ז בזק' defaultAccount="6000203000" />
               </div>
+              {bezeqPreviewId && <JournalPreviewModal entryId={bezeqPreviewId} onClose={() => setBezeqPreviewId(null)} />}
             </div>
           )}
 
