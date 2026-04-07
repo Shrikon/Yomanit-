@@ -427,7 +427,7 @@ function ElectricityDashboard({ muni, onNewIntake }: { muni: any, onNewIntake: (
               </table>}
         </div>
         <div className="bg-white rounded-xl border border-gray-200 p-4">
-          <div className="text-xs font-medium text-gray-600 mb-2">חשבון ספק חשמל</div>
+          <div className="text-xs font-medium text-gray-600 mb-2">חו"ז חברת חשמל</div>
           {editVendor ? (
             <div className="flex flex-col gap-2">
               <input value={vendorAccount} onChange={e => setVendorAccount(e.target.value)} className="border border-gray-200 rounded-lg px-2 py-1.5 text-xs font-mono w-full" />
@@ -709,18 +709,38 @@ export default function App() {
     } catch { setError('שגיאה'); } finally { setLoading(false); }
   }
 
+  function derivePeriod(dateFrom: string, dateTo: string): string {
+    // Try to extract YYYY-MM from date strings (various formats)
+    for (const d of [dateTo, dateFrom]) {
+      if (!d) continue;
+      // Try ISO format: 2026-03-15 or 15/03/2026 or 15.03.2026
+      let m = d.match(/(\d{4})-(\d{2})/);
+      if (m) return `${m[1]}-${m[2]}`;
+      m = d.match(/(\d{1,2})[\/.](\d{1,2})[\/.](\d{4})/);
+      if (m) return `${m[3]}-${m[2].padStart(2,'0')}`;
+      m = d.match(/(\d{1,2})[\/.](\d{1,2})[\/.](\d{2})$/);
+      if (m) return `20${m[3]}-${m[2].padStart(2,'0')}`;
+    }
+    return '';
+  }
+
   async function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file || !muni) return;
     setLoading(true); setError('');
     try {
-      const check = await apiFetch(`/journal-entries/check-period?municipality_id=${muni.id}&template_id=${BEZEQ_TEMPLATE_ID}&period=${period}`);
-      if (check.exists) { setLoading(false); setError(`קיימת פקודה לתקופה ${period} (${check.reference_num}). יש למחוק אותה קודם.`); return; }
       const fd = new FormData();
       fd.append('file', file); fd.append('municipality_id', muni.id); fd.append('template', 'bezeq');
       const res = await fetch(`${API}/upload`, { method: 'POST', body: fd });
       const data = await res.json();
       if (!res.ok) throw new Error(typeof data.detail === 'string' ? data.detail : 'שגיאה');
+      // Auto-detect period from file dates
+      const filePeriod = derivePeriod(data.date_from || '', data.date_to || '');
+      if (!filePeriod) throw new Error('לא ניתן לזהות תקופה מהקובץ. ודא שהקובץ מכיל תאריכי חשבון.');
+      setPeriod(filePeriod);
+      // Check for duplicate period
+      const check = await apiFetch(`/journal-entries/check-period?municipality_id=${muni.id}&template_id=${BEZEQ_TEMPLATE_ID}&period=${filePeriod}`);
+      if (check.exists) { setLoading(false); setError(`קיימת פקודה לתקופה ${filePeriod} (${check.reference_num}). יש למחוק אותה קודם.`); return; }
       setUploadResult(data); setStep(2);
     } catch (err: unknown) { setError(err instanceof Error ? err.message : 'שגיאה'); }
     finally { setLoading(false); }
@@ -1379,19 +1399,17 @@ export default function App() {
               </div>
               {step===1 && (
                 <div className="bg-white rounded-xl border border-gray-200 p-6">
-                  <div className="mb-4">
-                    <label className="text-xs text-gray-500 block mb-1">תקופה (YYYY-MM)</label>
-                    <input value={period} onChange={e=>setPeriod(e.target.value)} className="border border-gray-200 rounded-lg px-3 py-2 text-sm w-40"/>
-                  </div>
                   <label className={`border-2 border-dashed rounded-xl p-10 flex flex-col items-center cursor-pointer ${loading?'border-gray-200':'border-gray-300 hover:border-blue-400 hover:bg-blue-50'}`}>
                     <div className="text-4xl mb-3">📂</div>
                     <div className="text-sm font-medium text-gray-700">{loading?'מעלה...':'לחץ לבחירת קובץ בזק'}</div>
+                    <div className="text-xs text-gray-400 mt-1">התקופה תיקבע אוטומטית מהקובץ</div>
                     <input type="file" accept=".csv,.xlsx,.xls" onChange={handleFileUpload} className="hidden" disabled={loading}/>
                   </label>
                 </div>
               )}
               {step===2 && uploadResult && (
                 <div>
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4 text-sm text-blue-700">תקופה: {period}{uploadResult.date_from || uploadResult.date_to ? ` (${uploadResult.date_from} – ${uploadResult.date_to})` : ''}</div>
                   <div className="bg-green-50 border border-green-200 rounded-lg p-3 mb-4 text-sm text-green-700">נטענו {uploadResult.total_rows} שורות · {uploadResult.matched} תואמות · {uploadResult.missing} חסרות</div>
                   {uploadResult.missing > 0 && <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-4 text-sm text-amber-700">מספרים חסרים ייפתחו באינדקס וימתינו לשיוך סעיף תקציבי</div>}
                   <div className="bg-white rounded-xl border border-gray-200 overflow-hidden mb-4">
@@ -1420,7 +1438,7 @@ export default function App() {
                 <div>
                   <div className="bg-white rounded-xl border border-gray-200 p-5 mb-4">
                     <div className="grid grid-cols-3 gap-3">
-                      {[['רשות',muni?.name],['תקופה',period],['שורות',uploadResult.total_rows]].map(([l,v])=>(
+                      {[['רשות',muni?.name],['תקופה',`${period}${uploadResult.date_from?' ('+uploadResult.date_from+' – '+uploadResult.date_to+')':''}`],['שורות',uploadResult.total_rows]].map(([l,v])=>(
                         <div key={l as string} className="bg-gray-50 rounded-lg p-3"><div className="text-xs text-gray-500 mb-1">{l}</div><div className="text-sm font-medium text-gray-900">{v}</div></div>
                       ))}
                     </div>

@@ -1,8 +1,22 @@
 # routers/municipalities.py
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
+from uuid import uuid4
 import db; database = db
 
 router = APIRouter()
+
+@router.post("", status_code=201)
+async def create_municipality(payload: dict):
+    name = payload.get("name")
+    code = payload.get("code")
+    if not name or not code:
+        raise HTTPException(status_code=422, detail="name and code required")
+    muni_id = str(uuid4())
+    await database.execute(
+        "INSERT INTO municipalities (id, name, code) VALUES (:id, :name, :code)",
+        values={"id": muni_id, "name": name, "code": code}
+    )
+    return {"id": muni_id, "name": name, "code": code}
 
 @router.get("")
 async def list_municipalities():
