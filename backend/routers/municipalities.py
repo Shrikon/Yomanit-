@@ -39,6 +39,15 @@ async def municipality_stats(muni_id: str):
     }
 
 
+@router.delete("/{muni_id}")
+async def delete_municipality(muni_id: str):
+    """Soft-delete a municipality (set active=FALSE)."""
+    await database.execute(
+        "UPDATE municipalities SET active = FALSE WHERE id = :id",
+        values={"id": muni_id}
+    )
+    return {"deleted": True}
+
 @router.get("/{muni_id}/settings")
 async def get_municipality_settings(muni_id: str):
     rows = await database.fetch_all(
