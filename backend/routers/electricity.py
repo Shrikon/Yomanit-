@@ -546,7 +546,10 @@ async def electricity_budget_forecast(
         last_amount = sorted_amounts[-1][1] if sorted_amounts else avg_monthly
 
         # If we have fewer than 12 months, scale up proportionally
-        annual_base = total_amount * (12 / n) if n < 12 else total_amount
+        # Use total periods across all contracts (not per-contract count)
+        # so contracts missing from some periods are treated as zero, not missing
+        effective_n = max(n, months_count)
+        annual_base = total_amount * (12 / effective_n) if effective_n < 12 else total_amount
 
         # Distribute across 12 months with trend
         month_forecasts = []
