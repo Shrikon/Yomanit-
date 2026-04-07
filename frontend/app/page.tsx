@@ -120,10 +120,7 @@ function CelcomDashboard({ muni, view, setView }: { muni: any, view: string, set
           <div className="text-xs text-gray-400 mb-1">מצב מודול</div>
           <div className="text-sm font-medium text-purple-700">פעיל</div>
         </div>
-        <div className="bg-white rounded-xl border border-gray-200 p-4">
-          <div className="text-xs text-gray-400 mb-1">פקודות מרוכזות</div>
-          <div className="text-sm font-medium text-green-700">זמין ✓</div>
-        </div>
+        <VendorAccountPanel muni={muni} templateName="celcom" label='חו"ז סלקום' defaultAccount="6000204000" />
       </div>
     </div>
   );
@@ -311,6 +308,52 @@ function CelcomDashboard({ muni, view, setView }: { muni: any, view: string, set
   return null;
 }
 
+function VendorAccountPanel({ muni, templateName, label, defaultAccount }: { muni: any, templateName: string, label: string, defaultAccount: string }) {
+  const [account, setAccount] = React.useState(defaultAccount);
+  const [editing, setEditing] = React.useState(false);
+  const [saved, setSaved] = React.useState(false);
+
+  React.useEffect(() => {
+    if (!muni) return;
+    apiFetch(`/municipalities/${muni.id}/settings`).then((s: any) => {
+      // Look for vendor_account with this template name
+      if (s?.vendor_account) setAccount(s.vendor_account);
+    }).catch(() => {});
+  }, [muni?.id]);
+
+  const save = async () => {
+    if (!muni) return;
+    await apiFetch(`/municipalities/${muni.id}/settings`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ template_name: templateName, key: 'vendor_account', value: account }),
+    });
+    setEditing(false);
+    setSaved(true);
+    setTimeout(() => setSaved(false), 3000);
+  };
+
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 p-4">
+      <div className="text-xs font-medium text-gray-600 mb-2">{label}</div>
+      {saved && <div className="text-xs text-green-600 mb-2">נשמר</div>}
+      {editing ? (
+        <div className="flex flex-col gap-2">
+          <input value={account} onChange={e => setAccount(e.target.value)} className="border border-gray-200 rounded-lg px-2 py-1.5 text-xs font-mono w-full" />
+          <div className="flex gap-2">
+            <button onClick={save} className="flex-1 text-xs bg-green-600 text-white px-2 py-1.5 rounded-lg">שמור</button>
+            <button onClick={() => setEditing(false)} className="text-xs text-gray-400 px-2">ביטול</button>
+          </div>
+        </div>
+      ) : (
+        <div className="flex items-center justify-between">
+          <code className="text-xs font-mono bg-gray-50 px-2 py-1 rounded">{account}</code>
+          <button onClick={() => setEditing(true)} className="text-xs text-blue-600 hover:underline">עדכן</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ElectricityDashboard({ muni, onNewIntake }: { muni: any, onNewIntake: () => void }) {
   const [entries, setEntries] = React.useState<any[]>([]);
   const [loading, setLoading] = React.useState(true);
@@ -426,23 +469,7 @@ function ElectricityDashboard({ muni, onNewIntake }: { muni: any, onNewIntake: (
                 </tbody>
               </table>}
         </div>
-        <div className="bg-white rounded-xl border border-gray-200 p-4">
-          <div className="text-xs font-medium text-gray-600 mb-2">חו"ז חברת חשמל</div>
-          {editVendor ? (
-            <div className="flex flex-col gap-2">
-              <input value={vendorAccount} onChange={e => setVendorAccount(e.target.value)} className="border border-gray-200 rounded-lg px-2 py-1.5 text-xs font-mono w-full" />
-              <div className="flex gap-2">
-                <button onClick={saveVendor} className="flex-1 text-xs bg-green-600 text-white px-2 py-1.5 rounded-lg">שמור</button>
-                <button onClick={() => setEditVendor(false)} className="text-xs text-gray-400 px-2">ביטול</button>
-              </div>
-            </div>
-          ) : (
-            <div className="flex items-center justify-between">
-              <code className="text-xs font-mono bg-gray-50 px-2 py-1 rounded">{vendorAccount}</code>
-              <button onClick={() => setEditVendor(true)} className="text-xs text-blue-600 hover:underline">עדכן</button>
-            </div>
-          )}
-        </div>
+        <VendorAccountPanel muni={muni} templateName="electricity" label='חו"ז חברת חשמל' defaultAccount="7000000000" />
       </div>
       </>)}
     </div>
@@ -536,37 +563,40 @@ function WelfareDashboard({ muni, onNewIntake, refreshKey }: { muni: any, onNewI
           </div>
         </div>
       )}
-      <div className="bg-white rounded-xl border border-gray-200">
-        <div className="p-3 border-b border-gray-100 flex justify-between items-center">
-          <span className="text-xs font-medium text-gray-600">פקודות יומן</span>
-          <span className="text-xs text-gray-400">{welfareEntries.length} פקודות</span>
+      <div className="grid grid-cols-3 gap-4">
+        <div className="col-span-2 bg-white rounded-xl border border-gray-200">
+          <div className="p-3 border-b border-gray-100 flex justify-between items-center">
+            <span className="text-xs font-medium text-gray-600">פקודות יומן</span>
+            <span className="text-xs text-gray-400">{welfareEntries.length} פקודות</span>
+          </div>
+          {welfareEntries.length === 0
+            ? <div className="p-8 text-center text-sm text-gray-400">אין פקודות עדיין</div>
+            : <table className="w-full text-sm">
+                <thead><tr className="border-b border-gray-100">
+                  {['מספר','תקופה','סכום','סטטוס',''].map(h =>
+                    <th key={h} className="text-right p-2.5 text-xs text-gray-400 font-medium">{h}</th>)}
+                </tr></thead>
+                <tbody>
+                  {welfareEntries.map((e: any) => (
+                    <tr key={e.id} className="border-b border-gray-50 hover:bg-gray-50">
+                      <td className="p-2.5 font-mono text-xs">{e.reference_num}</td>
+                      <td className="p-2.5 text-xs">{e.period}</td>
+                      <td className="p-2.5 text-xs font-medium">₪{Math.round(e.total_amount||0).toLocaleString()}</td>
+                      <td className="p-2.5">
+                        <span className={`px-2 py-0.5 rounded-full text-xs ${e.status==='draft' ? 'bg-blue-100 text-blue-700' : 'bg-green-100 text-green-700'}`}>
+                          {e.status==='draft' ? 'טיוטה' : 'יוצא'}
+                        </span>
+                      </td>
+                      <td className="p-2.5 flex gap-2">
+                        <button onClick={() => window.open(`${API}/journal-entries/${e.id}/export`, '_blank')} className="text-xs text-blue-600 hover:underline">Excel</button>
+                        {e.status !== 'locked' && <button onClick={() => deleteEntry(e.id, e.reference_num)} className="text-xs text-red-400 hover:underline">מחק</button>}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>}
         </div>
-        {welfareEntries.length === 0
-          ? <div className="p-8 text-center text-sm text-gray-400">אין פקודות עדיין</div>
-          : <table className="w-full text-sm">
-              <thead><tr className="border-b border-gray-100">
-                {['מספר','תקופה','סכום','סטטוס',''].map(h =>
-                  <th key={h} className="text-right p-2.5 text-xs text-gray-400 font-medium">{h}</th>)}
-              </tr></thead>
-              <tbody>
-                {welfareEntries.map((e: any) => (
-                  <tr key={e.id} className="border-b border-gray-50 hover:bg-gray-50">
-                    <td className="p-2.5 font-mono text-xs">{e.reference_num}</td>
-                    <td className="p-2.5 text-xs">{e.period}</td>
-                    <td className="p-2.5 text-xs font-medium">₪{Math.round(e.total_amount||0).toLocaleString()}</td>
-                    <td className="p-2.5">
-                      <span className={`px-2 py-0.5 rounded-full text-xs ${e.status==='draft' ? 'bg-blue-100 text-blue-700' : 'bg-green-100 text-green-700'}`}>
-                        {e.status==='draft' ? 'טיוטה' : 'יוצא'}
-                      </span>
-                    </td>
-                    <td className="p-2.5 flex gap-2">
-                      <button onClick={() => window.open(`${API}/journal-entries/${e.id}/export`, '_blank')} className="text-xs text-blue-600 hover:underline">Excel</button>
-                      {e.status !== 'locked' && <button onClick={() => deleteEntry(e.id, e.reference_num)} className="text-xs text-red-400 hover:underline">מחק</button>}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>}
+        <VendorAccountPanel muni={muni} templateName="welfare" label='חו"ז משרד הרווחה' defaultAccount="7000034000" />
       </div>
       </>)}
     </div>
@@ -1362,25 +1392,28 @@ export default function App() {
                   </div>
                 ))}
               </div>
-              <div className="bg-white rounded-xl border border-gray-200">
-                <div className="p-4 border-b border-gray-100 text-sm font-medium">פקודות אחרונות</div>
-                {entries.length === 0 ? <div className="p-8 text-center text-sm text-gray-400">אין פקודות עדיין</div>
-                  : <table className="w-full text-sm"><thead><tr className="border-b border-gray-100">
-                      {['מספר','תקופה','סכום','סטטוס',''].map(h=><th key={h} className="text-right p-3 text-xs text-gray-500 font-medium">{h}</th>)}
-                    </tr></thead><tbody>
-                    {entries.filter((e:any)=>e.template_key==='bezeq'||(!e.template_key&&e.template_name!=='חשמל')).map(e=>(
-                      <tr key={e.id} className="border-b border-gray-50 hover:bg-gray-50">
-                        <td className="p-3 font-mono text-xs">{e.reference_num}</td>
-                        <td className="p-3 text-xs">{e.period}</td>
-                        <td className="p-3 font-medium text-xs">₪{(e.total_amount||0).toLocaleString()}</td>
-                        <td className="p-3"><span className={`px-2 py-0.5 rounded-full text-xs ${e.status==='draft'?'bg-blue-100 text-blue-700':'bg-green-100 text-green-700'}`}>{e.status==='draft'?'טיוטה':'מאושר'}</span></td>
-                        <td className="p-3 flex gap-3">
-                          <button onClick={()=>window.open(`${API}/journal-entries/${e.id}/export`,'_blank')} className="text-xs text-blue-600 hover:underline">Excel</button>
-                          {e.status !== 'approved' && <button onClick={()=>deleteJournalEntry(e.id, e.reference_num)} className="text-xs text-red-500 hover:underline">מחק</button>}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody></table>}
+              <div className="grid grid-cols-3 gap-4">
+                <div className="col-span-2 bg-white rounded-xl border border-gray-200">
+                  <div className="p-4 border-b border-gray-100 text-sm font-medium">פקודות אחרונות</div>
+                  {entries.length === 0 ? <div className="p-8 text-center text-sm text-gray-400">אין פקודות עדיין</div>
+                    : <table className="w-full text-sm"><thead><tr className="border-b border-gray-100">
+                        {['מספר','תקופה','סכום','סטטוס',''].map(h=><th key={h} className="text-right p-3 text-xs text-gray-500 font-medium">{h}</th>)}
+                      </tr></thead><tbody>
+                      {entries.filter((e:any)=>e.template_key==='bezeq'||(!e.template_key&&e.template_name!=='חשמל')).map(e=>(
+                        <tr key={e.id} className="border-b border-gray-50 hover:bg-gray-50">
+                          <td className="p-3 font-mono text-xs">{e.reference_num}</td>
+                          <td className="p-3 text-xs">{e.period}</td>
+                          <td className="p-3 font-medium text-xs">₪{(e.total_amount||0).toLocaleString()}</td>
+                          <td className="p-3"><span className={`px-2 py-0.5 rounded-full text-xs ${e.status==='draft'?'bg-blue-100 text-blue-700':'bg-green-100 text-green-700'}`}>{e.status==='draft'?'טיוטה':'מאושר'}</span></td>
+                          <td className="p-3 flex gap-3">
+                            <button onClick={()=>window.open(`${API}/journal-entries/${e.id}/export`,'_blank')} className="text-xs text-blue-600 hover:underline">Excel</button>
+                            {e.status !== 'approved' && <button onClick={()=>deleteJournalEntry(e.id, e.reference_num)} className="text-xs text-red-500 hover:underline">מחק</button>}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody></table>}
+                </div>
+                <VendorAccountPanel muni={muni} templateName="bezeq" label='חו"ז בזק' defaultAccount="6000203000" />
               </div>
             </div>
           )}
