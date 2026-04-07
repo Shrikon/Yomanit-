@@ -280,8 +280,11 @@ async def approve_welfare(payload: WelfareApproveIn):
         from index_cache import invalidate
         dirty = False
         # Update connection_name for all lines that have a description
+        import re as _re
         for line in payload.lines:
             desc_name = (line.description or '').strip()
+            # Strip period suffix like " 03/26" from name before saving to index
+            desc_name = _re.sub(r'\s+\d{2}/\d{2}$', '', desc_name)
             if desc_name and line.semel:
                 await database.execute(
                     """UPDATE indexes SET connection_name = :name, updated_at = NOW()
@@ -301,7 +304,7 @@ async def approve_welfare(payload: WelfareApproveIn):
                 if line.semel in seen_semels:
                     continue
                 seen_semels.add(line.semel)
-                conn_name = (line.description or '').strip() or None
+                conn_name = _re.sub(r'\s+\d{2}/\d{2}$', '', (line.description or '').strip()) or None
                 # Insert debit placeholder
                 await database.execute(
                     """INSERT INTO indexes (id, municipality_id, template_id, key_value, account_code, description, connection_name, active)
