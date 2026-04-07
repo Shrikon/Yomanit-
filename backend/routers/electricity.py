@@ -8,7 +8,7 @@ import hashlib, json
 
 router = APIRouter()
 
-ELEC_TEMPLATE_ID = "5594291d-2a5f-4b6c-846a-bed1290388b1"
+ELEC_TEMPLATE_ID = "9b8d0922-d520-490b-8da6-7a74140ae62a"
 HE_MONTHS = {
     'ינואר':'01','פברואר':'02','מרץ':'03','אפריל':'04',
     'מאי':'05','יוני':'06','יולי':'07','אוגוסט':'08',
