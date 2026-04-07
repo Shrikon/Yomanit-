@@ -165,6 +165,190 @@ async def check_period_route(municipality_id: str, template_id: str, period: str
     return {"exists": False}
 
 # =============================================
+# GET /journal-entries/budget-forecast
+# תחזית תקציב גנרית – לכל מודול
+# =============================================
+
+@router.get("/budget-forecast")
+async def budget_forecast(
+    municipality_id: str,
+    template_name: str,          # bezeq / electricity / welfare / cellcom
+    target_year: int = 2027,
+):
+    """
+    Generic 12-month budget forecast for any module.
+    Analyzes historical journal data, detects trends, projects forward.
+    """
+    db = get_db()
+
+    # Resolve template_name → template_id
+    tmpl_row = await db.fetch_one(
+        "SELECT id FROM templates WHERE name = :name",
+        values={"name": template_name}
+    )
+    if not tmpl_row:
+        return {"target_year": target_year, "accounts": [], "total": 0,
+                "months_data": 0, "message": f"תבנית {template_name} לא נמצאה"}
+
+    template_id = str(tmpl_row["id"])
+
+    # Fetch all journal lines (debit > 0) for this municipality + template
+    rows = await db.fetch_all(
+        """
+        SELECT je.period, jl.account, jl.description, jl.debit, jl.key_value
+        FROM journal_lines jl
+        JOIN journal_entries je ON je.id = jl.entry_id
+        WHERE je.municipality_id = :muni
+          AND je.template_id = :tmpl
+          AND je.is_active = TRUE
+          AND jl.debit > 0
+        ORDER BY je.period
+        """,
+        values={"muni": municipality_id, "tmpl": template_id}
+    )
+
+    MODULE_LABELS = {
+        "bezeq": "בזק", "electricity": "חשמל",
+        "welfare": "רווחה", "cellcom": "סלקום",
+    }
+    label = MODULE_LABELS.get(template_name, template_name)
+
+    if not rows:
+        return {"target_year": target_year, "accounts": [], "total": 0,
+                "months_data": 0, "message": f"אין נתוני {label} במערכת"}
+
+    # Group by key_value (contract/phone/ID) → list of (period, amount, account)
+    contract_data: dict[str, list] = {}
+    contract_account: dict[str, str] = {}
+    all_periods: set[str] = set()
+
+    for r in rows:
+        kv = r["key_value"] or ""
+        if not kv:
+            continue
+        period = r["period"]
+        amount = float(r["debit"] or 0)
+        account = r["account"]
+        all_periods.add(period)
+        if kv not in contract_data:
+            contract_data[kv] = []
+        contract_data[kv].append({"period": period, "amount": amount})
+        contract_account[kv] = account
+
+    sorted_periods = sorted(all_periods)
+    months_count = len(sorted_periods)
+
+    if months_count == 0:
+        return {"target_year": target_year, "accounts": [], "total": 0, "months_data": 0}
+
+    # Per-contract forecast with trend analysis
+    account_forecasts: dict[str, dict] = {}
+
+    for kv, data_points in contract_data.items():
+        account = contract_account[kv]
+        amounts_by_period: dict[str, float] = {}
+        for dp in data_points:
+            p = dp["period"]
+            amounts_by_period[p] = amounts_by_period.get(p, 0) + dp["amount"]
+
+        sorted_amounts = [(p, amounts_by_period[p]) for p in sorted(amounts_by_period.keys())]
+        n = len(sorted_amounts)
+        if n == 0:
+            continue
+
+        total_amount = sum(a for _, a in sorted_amounts)
+        avg_monthly = total_amount / n
+
+        # Linear regression trend
+        monthly_trend = 0.0
+        if n >= 3:
+            x_vals = list(range(n))
+            y_vals = [a for _, a in sorted_amounts]
+            x_mean = sum(x_vals) / n
+            y_mean = sum(y_vals) / n
+            num = sum((x - x_mean) * (y - y_mean) for x, y in zip(x_vals, y_vals))
+            den = sum((x - x_mean) ** 2 for x in x_vals)
+            if den > 0:
+                monthly_trend = num / den
+                max_trend = avg_monthly * 0.2
+                monthly_trend = max(-max_trend, min(max_trend, monthly_trend))
+
+        last_amount = sorted_amounts[-1][1] if sorted_amounts else avg_monthly
+        effective_n = max(n, months_count)
+        annual_base = total_amount * (12 / effective_n) if effective_n < 12 else total_amount
+
+        month_forecasts = []
+        for m in range(12):
+            if n >= 6:
+                projected = last_amount + monthly_trend * (m + 1)
+                projected = max(projected, avg_monthly * 0.3)
+            else:
+                projected = avg_monthly + monthly_trend * (m - 5.5)
+                projected = max(projected, avg_monthly * 0.5)
+            month_forecasts.append(round(projected, 2))
+
+        forecast_sum = sum(month_forecasts)
+        if forecast_sum > 0:
+            scale = annual_base / forecast_sum
+            month_forecasts = [round(v * scale, 2) for v in month_forecasts]
+
+        if account not in account_forecasts:
+            account_forecasts[account] = {
+                "account": account, "contracts": 0,
+                "historical_total": 0, "historical_months": 0,
+                "trend": "stable", "months": [0.0] * 12, "total": 0,
+            }
+
+        af = account_forecasts[account]
+        af["contracts"] += 1
+        af["historical_total"] += total_amount
+        af["historical_months"] = max(af["historical_months"], n)
+
+        for i in range(12):
+            af["months"][i] += month_forecasts[i]
+            af["months"][i] = round(af["months"][i], 2)
+
+        if monthly_trend > avg_monthly * 0.03:
+            if af["trend"] != "decline":
+                af["trend"] = "growth"
+        elif monthly_trend < -avg_monthly * 0.03:
+            if af["trend"] != "growth":
+                af["trend"] = "decline"
+
+    # Totals + account names from indexes
+    result_accounts = []
+    grand_total = 0
+    for acct, af in sorted(account_forecasts.items()):
+        af["total"] = round(sum(af["months"]), 2)
+        af["historical_total"] = round(af["historical_total"], 2)
+        grand_total += af["total"]
+        result_accounts.append(af)
+
+    account_names = {}
+    idx_rows = await db.fetch_all(
+        """SELECT DISTINCT account_code, connection_name FROM indexes
+           WHERE municipality_id = :muni AND template_id = :tmpl AND active = TRUE""",
+        values={"muni": municipality_id, "tmpl": template_id}
+    )
+    for ir in idx_rows:
+        acct = ir["account_code"]
+        name = ir["connection_name"] or ""
+        if acct not in account_names and name:
+            account_names[acct] = name
+
+    for af in result_accounts:
+        af["account_name"] = account_names.get(af["account"], "")
+
+    return {
+        "target_year": target_year,
+        "accounts": result_accounts,
+        "total": round(grand_total, 2),
+        "months_data": months_count,
+        "contracts_count": len(contract_data),
+        "periods_range": f"{sorted_periods[0]} – {sorted_periods[-1]}" if sorted_periods else "",
+    }
+
+# =============================================
 # GET /journal-entries
 # =============================================
 

@@ -27,7 +27,7 @@ const CATEGORIES = [
 
 let ELEC_TEMPLATE_ID = '5594291d-2a5f-4b6c-846a-bed1290388b1';
 
-function CelcomDashboard({ muni, view, setView }: { muni: any, view: string, setView: (v: 'home' | 'intake' | 'indexes') => void }) {
+function CelcomDashboard({ muni, view, setView }: { muni: any, view: string, setView: (v: 'home' | 'intake' | 'indexes' | 'budget') => void }) {
   const [previewResult, setPreviewResult] = React.useState<any>(null);
   const [loading, setLoading] = React.useState(false);
   const [approving, setApproving] = React.useState(false);
@@ -305,6 +305,8 @@ function CelcomDashboard({ muni, view, setView }: { muni: any, view: string, set
     </div>
   );
 
+  if (view === 'budget') return <BudgetForecast muni={muni} templateName="cellcom" title="תקצוב סלקום" />;
+
   return null;
 }
 
@@ -427,7 +429,7 @@ function JournalPreviewModal({ entryId, onClose }: { entryId: string, onClose: (
   );
 }
 
-function ElectricityBudget({ muni }: { muni: any }) {
+function BudgetForecast({ muni, templateName, title }: { muni: any; templateName: string; title: string }) {
   const currentYear = new Date().getFullYear();
   const [targetYear, setTargetYear] = React.useState(currentYear + 1);
   const [data, setData] = React.useState<any>(null);
@@ -440,7 +442,7 @@ function ElectricityBudget({ muni }: { muni: any }) {
     if (!muni) return;
     setLoading(true);
     try {
-      const res = await apiFetch(`/upload/electricity/budget-forecast?municipality_id=${muni.id}&target_year=${targetYear}`);
+      const res = await apiFetch(`/journal-entries/budget-forecast?municipality_id=${muni.id}&template_name=${templateName}&target_year=${targetYear}`);
       setData(res);
     } catch { }
     finally { setLoading(false); }
@@ -463,7 +465,7 @@ function ElectricityBudget({ muni }: { muni: any }) {
     <div>
       <div className="flex justify-between items-center mb-5">
         <div>
-          <h1 className="text-base font-semibold">תקצוב חשמל – תחזית שנתית</h1>
+          <h1 className="text-base font-semibold">{title} – תחזית שנתית</h1>
           <p className="text-xs text-gray-500">{muni?.name}</p>
         </div>
         <div className="flex items-center gap-3">
@@ -815,17 +817,17 @@ export default function App() {
   const [muni, setMuni] = useState<Municipality | null>(null);
   const [munis, setMunis] = useState<Municipality[]>([]);
   const [activeTab, setActiveTab] = useState('bezeq');
-  const [bezeqView, setBezeqView] = useState<'home'|'intake'|'indexes'|'settings'>('home');
+  const [bezeqView, setBezeqView] = useState<'home'|'intake'|'indexes'|'settings'|'budget'>('home');
   const [bezeqPreviewId, setBezeqPreviewId] = useState<string|null>(null);
   const [elecView, setElecView] = useState<'home'|'intake'|'indexes'|'budget'>('home');
-  const [celcomView, setCelcomView] = useState<'home'|'intake'|'indexes'>('home');
+  const [celcomView, setCelcomView] = useState<'home'|'intake'|'indexes'|'budget'>('home');
   const [elecIndexSearch, setElecIndexSearch] = useState('');
   const [elecIndexes, setElecIndexes] = useState<any[]>([]);
   const [splitModal, setSplitModal] = useState<null|{open:boolean,contract:string,connectionName:string,splits:any[],saving:boolean,error:string}>(null);
   const [elecResult, setElecResult] = useState<any>(null);
   const [elecVendorAccount, setElecVendorAccount] = useState('7000000000');
   const [elecLoading, setElecLoading] = useState(false);
-  const [welfareView, setWelfareView] = useState<'home'|'intake'|'indexes'>('home');
+  const [welfareView, setWelfareView] = useState<'home'|'intake'|'indexes'|'budget'>('home');
   const WELFARE_TEMPLATE_ID_IDX = '95b37d2d-c9ea-4ef1-9164-ab5ac642b0c7';
   const [welfareIndexes, setWelfareIndexes] = useState<any[]>([]);
   const [welfareIndexSearch, setWelfareIndexSearch] = useState('');
@@ -1040,6 +1042,7 @@ export default function App() {
       { label: 'דשבורד', view: 'home', icon: '📊' },
       { label: 'קליטת חשבון', view: 'intake', icon: '📂' },
       { label: 'אינדקסים', view: 'indexes', icon: '📋' },
+      { label: 'תקצוב', view: 'budget', icon: '📈' },
       { label: 'הגדרות', view: 'settings', icon: '⚙️' },
     ],
     electricity: [
@@ -1051,12 +1054,14 @@ export default function App() {
     welfare: [
       { label: 'דשבורד', view: 'home', icon: '📊' },
       { label: 'קליטת דוח', view: 'intake', icon: '📂' },
-      { label: 'עדכון אינדקס', view: 'indexes', icon: '📋' }, // welfare-index
+      { label: 'עדכון אינדקס', view: 'indexes', icon: '📋' },
+      { label: 'תקצוב', view: 'budget', icon: '📈' },
     ],
     celcom: [
       { label: 'דשבורד', view: 'home', icon: '📊' },
       { label: 'קליטת חשבון', view: 'intake', icon: '📂' },
       { label: 'אינדקס', view: 'indexes', icon: '📋' },
+      { label: 'תקצוב', view: 'budget', icon: '📈' },
     ],
     leasing: [{ label: 'בקרוב', view: 'home', icon: '🚗' }],
     other:   [{ label: 'בקרוב', view: 'home', icon: '📁' }],
@@ -1386,7 +1391,7 @@ export default function App() {
           })()}
 
           {activeTab === 'electricity' && elecView === 'budget' && (
-            <ElectricityBudget muni={muni} />
+            <BudgetForecast muni={muni} templateName="electricity" title="תקצוב חשמל" />
           )}
 
           {activeTab === 'welfare' && welfareView === 'home' && (
@@ -1581,6 +1586,9 @@ export default function App() {
             </div>
           )}
 
+          {activeTab === 'welfare' && welfareView === 'budget' && (
+            <BudgetForecast muni={muni} templateName="welfare" title="תקצוב רווחה" />
+          )}
 
           {activeTab !== 'bezeq' && activeTab !== 'electricity' && activeTab !== 'welfare' && activeTab !== 'celcom' && (
             <div className="flex flex-col items-center justify-center h-64 text-center">
@@ -1711,6 +1719,10 @@ export default function App() {
                 <button onClick={saveSettings} disabled={loading} className="bg-blue-600 text-white rounded-lg px-6 py-2 text-sm disabled:opacity-50">{loading ? 'שומר...' : 'שמור'}</button>
               </div>
             </div>
+          )}
+
+          {activeTab === 'bezeq' && bezeqView === 'budget' && (
+            <BudgetForecast muni={muni} templateName="bezeq" title="תקצוב בזק" />
           )}
 
           {activeTab === 'bezeq' && bezeqView === 'indexes' && (
