@@ -440,3 +440,195 @@ async def approve_electricity(payload: ApproveIn):
         "lines_count":   len(payload.lines) + 1,
         "batch_id":      payload.batch_id,
     }
+
+
+# =============================================
+# BUDGET FORECAST – תקצוב שנתי לחשמל
+# =============================================
+
+@router.get("/budget-forecast")
+async def electricity_budget_forecast(
+    municipality_id: str,
+    target_year: int = 2027,
+):
+    """
+    Generate a 12-month budget forecast based on historical electricity data.
+    - Analyzes consumption trends per contract
+    - Extrapolates missing months proportionally
+    - Reflects growth/decline trends in projections
+    """
+    from main import database
+    from datetime import date
+    import statistics
+
+    # Fetch all electricity journal lines for this municipality
+    rows = await database.fetch_all(
+        """
+        SELECT je.period, jl.account, jl.description, jl.debit, jl.key_value
+        FROM journal_lines jl
+        JOIN journal_entries je ON je.id = jl.entry_id
+        WHERE je.municipality_id = :muni
+          AND je.template_id = :tmpl
+          AND je.is_active = TRUE
+          AND jl.debit > 0
+        ORDER BY je.period
+        """,
+        values={"muni": municipality_id, "tmpl": ELEC_TEMPLATE_ID}
+    )
+
+    if not rows:
+        return {"target_year": target_year, "accounts": [], "total": 0, "months_data": 0, "message": "אין נתוני חשמל במערכת"}
+
+    # Group by contract (key_value) → list of (period, amount, account)
+    contract_data: dict[str, list] = {}
+    contract_account: dict[str, str] = {}  # last known account per contract
+    all_periods: set[str] = set()
+
+    for r in rows:
+        kv = r["key_value"] or ""
+        if not kv:
+            continue
+        period = r["period"]
+        amount = float(r["debit"] or 0)
+        account = r["account"]
+        all_periods.add(period)
+        if kv not in contract_data:
+            contract_data[kv] = []
+        contract_data[kv].append({"period": period, "amount": amount})
+        contract_account[kv] = account  # keep latest
+
+    sorted_periods = sorted(all_periods)
+    months_count = len(sorted_periods)
+
+    if months_count == 0:
+        return {"target_year": target_year, "accounts": [], "total": 0, "months_data": 0}
+
+    # For each contract, calculate annual forecast with trend
+    # account_forecasts: account_code → {month_01..month_12, total, contracts}
+    account_forecasts: dict[str, dict] = {}
+
+    for kv, data_points in contract_data.items():
+        account = contract_account[kv]
+        amounts_by_period = {}
+        for dp in data_points:
+            p = dp["period"]
+            amounts_by_period[p] = amounts_by_period.get(p, 0) + dp["amount"]
+
+        # Sort by period
+        sorted_amounts = [(p, amounts_by_period[p]) for p in sorted(amounts_by_period.keys())]
+        n = len(sorted_amounts)
+
+        if n == 0:
+            continue
+
+        # Calculate average and trend
+        total_amount = sum(a for _, a in sorted_amounts)
+        avg_monthly = total_amount / n
+
+        # Linear trend: monthly change rate
+        monthly_trend = 0.0
+        if n >= 3:
+            # Simple linear regression on amounts
+            x_vals = list(range(n))
+            y_vals = [a for _, a in sorted_amounts]
+            x_mean = sum(x_vals) / n
+            y_mean = sum(y_vals) / n
+            num = sum((x - x_mean) * (y - y_mean) for x, y in zip(x_vals, y_vals))
+            den = sum((x - x_mean) ** 2 for x in x_vals)
+            if den > 0:
+                monthly_trend = num / den
+                # Cap trend at ±20% of average to avoid wild projections
+                max_trend = avg_monthly * 0.2
+                monthly_trend = max(-max_trend, min(max_trend, monthly_trend))
+
+        # Generate 12 monthly forecasts
+        # Start from the last known data point and project forward
+        last_amount = sorted_amounts[-1][1] if sorted_amounts else avg_monthly
+
+        # If we have fewer than 12 months, scale up proportionally
+        annual_base = total_amount * (12 / n) if n < 12 else total_amount
+
+        # Distribute across 12 months with trend
+        month_forecasts = []
+        for m in range(12):
+            if n >= 6:
+                # Enough data for trend-based projection
+                projected = last_amount + monthly_trend * (m + 1)
+                projected = max(projected, avg_monthly * 0.3)  # floor at 30% of avg
+            else:
+                # Not enough data, use average with slight trend
+                projected = avg_monthly + monthly_trend * (m - 5.5)
+                projected = max(projected, avg_monthly * 0.5)
+
+            month_forecasts.append(round(projected, 2))
+
+        # Normalize to match annual estimate
+        forecast_sum = sum(month_forecasts)
+        if forecast_sum > 0:
+            scale = annual_base / forecast_sum
+            month_forecasts = [round(v * scale, 2) for v in month_forecasts]
+
+        # Accumulate into account
+        if account not in account_forecasts:
+            account_forecasts[account] = {
+                "account": account,
+                "contracts": 0,
+                "historical_total": 0,
+                "historical_months": 0,
+                "trend": "stable",
+                "months": [0.0] * 12,
+                "total": 0,
+            }
+
+        af = account_forecasts[account]
+        af["contracts"] += 1
+        af["historical_total"] += total_amount
+        af["historical_months"] = max(af["historical_months"], n)
+
+        for i in range(12):
+            af["months"][i] += month_forecasts[i]
+            af["months"][i] = round(af["months"][i], 2)
+
+        # Determine trend direction
+        if monthly_trend > avg_monthly * 0.03:
+            if af["trend"] != "decline":
+                af["trend"] = "growth"
+        elif monthly_trend < -avg_monthly * 0.03:
+            if af["trend"] != "growth":
+                af["trend"] = "decline"
+
+    # Round and compute totals
+    result_accounts = []
+    grand_total = 0
+
+    for acct, af in sorted(account_forecasts.items()):
+        af["total"] = round(sum(af["months"]), 2)
+        af["historical_total"] = round(af["historical_total"], 2)
+        grand_total += af["total"]
+        result_accounts.append(af)
+
+    # Get connection names for accounts from indexes
+    account_names = {}
+    idx_rows = await database.fetch_all(
+        """SELECT DISTINCT account_code, connection_name FROM indexes
+           WHERE municipality_id = :muni AND template_id = :tmpl AND active = TRUE""",
+        values={"muni": municipality_id, "tmpl": ELEC_TEMPLATE_ID}
+    )
+    # Use first non-empty connection_name per account
+    for ir in idx_rows:
+        acct = ir["account_code"]
+        name = ir["connection_name"] or ""
+        if acct not in account_names and name:
+            account_names[acct] = name
+
+    for af in result_accounts:
+        af["account_name"] = account_names.get(af["account"], "")
+
+    return {
+        "target_year": target_year,
+        "accounts": result_accounts,
+        "total": round(grand_total, 2),
+        "months_data": months_count,
+        "contracts_count": len(contract_data),
+        "periods_range": f"{sorted_periods[0]} – {sorted_periods[-1]}" if sorted_periods else "",
+    }

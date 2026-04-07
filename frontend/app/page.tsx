@@ -427,6 +427,134 @@ function JournalPreviewModal({ entryId, onClose }: { entryId: string, onClose: (
   );
 }
 
+function ElectricityBudget({ muni }: { muni: any }) {
+  const currentYear = new Date().getFullYear();
+  const [targetYear, setTargetYear] = React.useState(currentYear + 1);
+  const [data, setData] = React.useState<any>(null);
+  const [loading, setLoading] = React.useState(false);
+  const [expandedAccounts, setExpandedAccounts] = React.useState<Set<string>>(new Set());
+
+  const HE_MONTHS = ['ינואר','פברואר','מרץ','אפריל','מאי','יוני','יולי','אוגוסט','ספטמבר','אוקטובר','נובמבר','דצמבר'];
+
+  const loadForecast = async () => {
+    if (!muni) return;
+    setLoading(true);
+    try {
+      const res = await apiFetch(`/upload/electricity/budget-forecast?municipality_id=${muni.id}&target_year=${targetYear}`);
+      setData(res);
+    } catch { }
+    finally { setLoading(false); }
+  };
+
+  React.useEffect(() => { loadForecast(); }, [muni?.id, targetYear]);
+
+  const toggleAccount = (acct: string) => {
+    setExpandedAccounts(prev => {
+      const next = new Set(prev);
+      if (next.has(acct)) next.delete(acct); else next.add(acct);
+      return next;
+    });
+  };
+
+  const trendLabel = (t: string) => t === 'growth' ? '📈 עלייה' : t === 'decline' ? '📉 ירידה' : '➡️ יציב';
+  const trendColor = (t: string) => t === 'growth' ? 'text-red-600' : t === 'decline' ? 'text-green-600' : 'text-gray-500';
+
+  return (
+    <div>
+      <div className="flex justify-between items-center mb-5">
+        <div>
+          <h1 className="text-base font-semibold">תקצוב חשמל – תחזית שנתית</h1>
+          <p className="text-xs text-gray-500">{muni?.name}</p>
+        </div>
+        <div className="flex items-center gap-3">
+          <label className="text-xs text-gray-500">שנת תקציב:</label>
+          <select value={targetYear} onChange={e => setTargetYear(parseInt(e.target.value))} className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm">
+            {[currentYear, currentYear + 1, currentYear + 2].map(y => <option key={y} value={y}>{y}</option>)}
+          </select>
+          <button onClick={loadForecast} disabled={loading} className="bg-blue-600 text-white px-4 py-1.5 rounded-lg text-sm disabled:opacity-50">{loading ? 'מחשב...' : 'חשב תחזית'}</button>
+        </div>
+      </div>
+
+      {loading && <div className="p-12 text-center text-sm text-gray-400">מחשב תחזית...</div>}
+
+      {data && !loading && (
+        <>
+          <div className="grid grid-cols-4 gap-3 mb-5">
+            <div className="bg-white rounded-xl border border-gray-200 p-4">
+              <div className="text-xs text-gray-400 mb-1">תחזית שנתית</div>
+              <div className="text-lg font-bold text-gray-900">₪{Math.round(data.total).toLocaleString()}</div>
+            </div>
+            <div className="bg-white rounded-xl border border-gray-200 p-4">
+              <div className="text-xs text-gray-400 mb-1">סעיפים תקציביים</div>
+              <div className="text-lg font-bold text-gray-900">{data.accounts?.length || 0}</div>
+            </div>
+            <div className="bg-white rounded-xl border border-gray-200 p-4">
+              <div className="text-xs text-gray-400 mb-1">חוזים</div>
+              <div className="text-lg font-bold text-gray-900">{data.contracts_count || 0}</div>
+            </div>
+            <div className="bg-white rounded-xl border border-gray-200 p-4">
+              <div className="text-xs text-gray-400 mb-1">תקופות נתונים</div>
+              <div className="text-lg font-bold text-gray-900">{data.months_data || 0}</div>
+              <div className="text-xs text-gray-400 mt-0.5">{data.periods_range || ''}</div>
+            </div>
+          </div>
+
+          {data.message && <div className="bg-amber-50 border border-amber-200 text-amber-700 text-sm rounded-lg p-3 mb-4">{data.message}</div>}
+
+          {data.accounts?.length > 0 && (
+            <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+              <div className="p-3 border-b border-gray-100 flex justify-between items-center">
+                <span className="text-xs font-medium text-gray-600">תחזית לפי סעיף תקציבי – {targetYear}</span>
+                <span className="text-xs text-gray-400">{data.accounts.length} סעיפים</span>
+              </div>
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="bg-gray-50 border-b border-gray-200">
+                    <th className="text-right p-2.5 font-medium text-gray-500 sticky right-0 bg-gray-50">סעיף</th>
+                    {HE_MONTHS.map(m => <th key={m} className="text-center p-2 font-medium text-gray-400 min-w-[65px]">{m.slice(0,3)}</th>)}
+                    <th className="text-center p-2.5 font-medium text-gray-500 bg-blue-50">סה"כ שנתי</th>
+                    <th className="text-center p-2.5 font-medium text-gray-500">מגמה</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.accounts.map((acct: any) => (
+                    <tr key={acct.account} className="border-b border-gray-50 hover:bg-gray-50 cursor-pointer" onClick={() => toggleAccount(acct.account)}>
+                      <td className="p-2.5 sticky right-0 bg-white">
+                        <div className="font-mono text-xs font-medium">{acct.account}</div>
+                        {acct.account_name && <div className="text-[10px] text-gray-400 truncate max-w-[150px]">{acct.account_name}</div>}
+                        <div className="text-[10px] text-gray-300">{acct.contracts} חוזים</div>
+                      </td>
+                      {acct.months.map((v: number, i: number) => (
+                        <td key={i} className="text-center p-1.5 font-mono text-[11px]">
+                          {Math.round(v).toLocaleString()}
+                        </td>
+                      ))}
+                      <td className="text-center p-2.5 font-mono font-bold bg-blue-50">₪{Math.round(acct.total).toLocaleString()}</td>
+                      <td className={`text-center p-2.5 text-[11px] ${trendColor(acct.trend)}`}>{trendLabel(acct.trend)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr className="bg-gray-100 border-t-2 border-gray-300 font-bold">
+                    <td className="p-2.5 text-xs sticky right-0 bg-gray-100">סה"כ</td>
+                    {HE_MONTHS.map((_, i) => (
+                      <td key={i} className="text-center p-1.5 font-mono text-[11px]">
+                        {Math.round(data.accounts.reduce((s: number, a: any) => s + (a.months[i] || 0), 0)).toLocaleString()}
+                      </td>
+                    ))}
+                    <td className="text-center p-2.5 font-mono bg-blue-100">₪{Math.round(data.total).toLocaleString()}</td>
+                    <td></td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 function ElectricityDashboard({ muni, onNewIntake }: { muni: any, onNewIntake: () => void }) {
   const [entries, setEntries] = React.useState<any[]>([]);
   const [loading, setLoading] = React.useState(true);
@@ -689,7 +817,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('bezeq');
   const [bezeqView, setBezeqView] = useState<'home'|'intake'|'indexes'|'settings'>('home');
   const [bezeqPreviewId, setBezeqPreviewId] = useState<string|null>(null);
-  const [elecView, setElecView] = useState<'home'|'intake'|'indexes'>('home');
+  const [elecView, setElecView] = useState<'home'|'intake'|'indexes'|'budget'>('home');
   const [celcomView, setCelcomView] = useState<'home'|'intake'|'indexes'>('home');
   const [elecIndexSearch, setElecIndexSearch] = useState('');
   const [elecIndexes, setElecIndexes] = useState<any[]>([]);
@@ -918,6 +1046,7 @@ export default function App() {
       { label: 'דשבורד', view: 'home', icon: '📊' },
       { label: 'קליטת חשבון', view: 'intake', icon: '📂' },
       { label: 'אינדקסים', view: 'indexes', icon: '📋' },
+      { label: 'תקצוב', view: 'budget', icon: '📈' },
     ],
     welfare: [
       { label: 'דשבורד', view: 'home', icon: '📊' },
@@ -1255,6 +1384,10 @@ export default function App() {
               </div>
             );
           })()}
+
+          {activeTab === 'electricity' && elecView === 'budget' && (
+            <ElectricityBudget muni={muni} />
+          )}
 
           {activeTab === 'welfare' && welfareView === 'home' && (
             <WelfareDashboard muni={muni} onNewIntake={() => { setWelfareView('intake'); setWelfareResult(null); }} refreshKey={welfareRefreshKey} />
