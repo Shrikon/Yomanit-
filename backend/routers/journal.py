@@ -315,12 +315,14 @@ async def export_journal_entry(entry_id: str):
     import openpyxl
     from openpyxl.styles import Font, PatternFill
     from fastapi.responses import StreamingResponse
+    import calendar
 
     entry = await get_journal_entry(entry_id)
 
     period = entry["period"]
     y, m   = int(period.split("-")[0]), int(period.split("-")[1])
-    date_str = f"1/{m}/{y}"
+    last_day = calendar.monthrange(y, m)[1]
+    date_str = f"{last_day}/{m}/{y}"
     year_num = y
 
     extra = {}
